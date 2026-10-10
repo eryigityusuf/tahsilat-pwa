@@ -1,0 +1,20 @@
+GITHUB PAGES ÜCRETSİZ KURULUM
+
+1. https://github.com adresinde ücretsiz hesap açın veya giriş yapın.
+2. Sağ üstteki + işaretinden New repository seçin.
+3. Repository name alanına tahsilat-pwa yazın.
+4. Public seçin ve Create repository düğmesine basın.
+5. Add file > Upload files seçeneğine girin.
+6. Bu klasördeki dosyaları ve icons klasörünü yükleyin.
+7. Commit changes düğmesine basın.
+8. Settings > Pages bölümünü açın.
+9. Build and deployment altında Source: Deploy from a branch seçin.
+10. Branch: main, klasör: /(root) seçip Save düğmesine basın.
+11. Birkaç dakika sonra aynı Pages ekranında uygulama adresiniz görünür.
+
+Adres şu biçimde olur:
+https://GITHUB-KULLANICI-ADINIZ.github.io/tahsilat-pwa/
+
+Telefonunuzda bu adresi açıp Uygulamayı yükle veya Ana ekrana ekle seçeneğini kullanın.
+
+NOT: ZIP dosyasını GitHub deposunun içine tek parça olarak yüklemeyin. ZIP'i açıp içindeki dosyaları yükleyin.

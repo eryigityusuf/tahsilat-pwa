@@ -1,0 +1,26 @@
+{
+  "id": "./",
+  "name": "Tahsilat Yönetimi",
+  "short_name": "Tahsilat",
+  "description": "Bağış taahhütleri, tahsilatlar, personel ve öğretmen ödemeleri yönetimi",
+  "lang": "tr",
+  "dir": "ltr",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],
+  "orientation": "any",
+  "background_color": "#eef3f7",
+  "theme_color": "#163a5f",
+  "categories": ["finance", "business", "productivity"],
+  "prefer_related_applications": false,
+  "icons": [
+    {"src":"./icons/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any"},
+    {"src":"./icons/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any"},
+    {"src":"./icons/icon-maskable-192.png","sizes":"192x192","type":"image/png","purpose":"maskable"},
+    {"src":"./icons/icon-maskable-512.png","sizes":"512x512","type":"image/png","purpose":"maskable"}
+  ],
+  "shortcuts": [
+    {"name":"Tahsilat sistemini aç","short_name":"Sistemi aç","url":"./"}
+  ]
+}
