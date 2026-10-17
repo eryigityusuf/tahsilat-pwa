@@ -706,7 +706,7 @@ function bulkImportAccounting(token, payload) {
         if(type==='TAHSİLAT') {
           let pledge=linkedId?pledgeById[normalizeKey_(linkedId)]:null;
           if(!pledge&&!linkedId) {
-            const matches=pledgeRows.filter(function(r){return normalizeKey_(r[3])===normalizeKey_(name)&&(!detailType||normalizeKey_(r[2])===normalizeKey_(detailType))&&(!reference||normalizeKey_(r[6])===normalizeKey_(reference))&&String(r[15]||'AKTİF').toUpperCase()!=='ŞÜPHELİ'&&(Number(r[9])||0)>0;});
+            const matches=pledgeRows.filter(function(r){return normalizeKey_(r[3])===normalizeKey_(name)&&(!detailType||normalizeKey_(r[2])===normalizeKey_(detailType))&&(!reference||referenceKey_(r[6])===referenceKey_(reference))&&String(r[15]||'AKTİF').toUpperCase()!=='ŞÜPHELİ'&&(Number(r[9])||0)>0;});
             if(matches.length===1) pledge=matches[0];
             else if(matches.length>1) throw new Error('Birden fazla taahhüt eşleşti; BAĞLI KAYIT NO yazın');
           }
@@ -817,7 +817,7 @@ function saveCollection(token, payload) {
     const current = findRowBy_(APP.sheets.pledges, 1, pledgeId);
     if (!current) throw new Error('Taahhüt bulunamadı.');
     if (String(current.values[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') throw new Error('Bu kayıt şüpheli alacaklarda. Tahsilat eklemeden önce aktife geri alın.');
-    if (!isApproverSession_(session) && normalizeKey_(current.values[6]) !== normalizeKey_(session.reference)) throw new Error('Bu kayda erişiminiz yok.');
+    if (!isApproverSession_(session) && referenceKey_(current.values[6]) !== referenceKey_(session.reference)) throw new Error('Bu kayda erişiminiz yok.');
     const available = Math.max(0, (Number(current.values[9]) || 0) - pendingAmountForPledge_(pledgeId, ''));
     if (amount > available) throw new Error('Tahsilat, kalan ve onay bekleyen kayıtlar dikkate alındığında kullanılabilir ' + moneyText_(available) + ' tutarından büyük olamaz.');
     const account = findRowBy_(APP.sheets.cashAccounts, 1, accountId);
@@ -869,7 +869,7 @@ function saveBulkCollections(token, payload) {
       if (!record) throw new Error('Taahhüt bulunamadı: ' + pledgeId);
       const pledge = record.values;
       if (String(pledge[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') throw new Error(pledge[3] + ' kaydı şüpheli alacaklarda. Önce aktife geri alın.');
-      if (!isApproverSession_(session) && normalizeKey_(pledge[6]) !== normalizeKey_(session.reference)) throw new Error(pledge[3] + ' kaydına erişiminiz yok.');
+      if (!isApproverSession_(session) && referenceKey_(pledge[6]) !== referenceKey_(session.reference)) throw new Error(pledge[3] + ' kaydına erişiminiz yok.');
       const amount = positiveNumber_(item.amount, pledge[3] + ' tahsilat tutarı');
       const remaining = Math.max(0, (Number(pledge[9]) || 0) - pendingAmountForPledge_(pledgeId, ''));
       if (amount > remaining) throw new Error(pledge[3] + ' için tahsilat kalan ' + moneyText_(remaining) + ' tutarından büyük olamaz.');
@@ -1146,7 +1146,7 @@ function saveReferenceTarget(token, payload) {
   if(end<start) throw new Error('Bitiş tarihi başlangıçtan önce olamaz.');
   const pledgeTarget=nonNegativeNumber_(payload.pledgeTarget,'Temin hedefi'), collectionTarget=nonNegativeNumber_(payload.collectionTarget,'Tahsilat hedefi');
   if(pledgeTarget<=0&&collectionTarget<=0) throw new Error('En az bir hedef sıfırdan büyük olmalıdır.');
-  const duplicate=optionalDataRows_(APP.sheets.referenceTargets).some(function(r){return normalizeKey_(r[3])===normalizeKey_(reference)&&isoDate_(r[1])===isoDate_(start)&&isoDate_(r[2])===isoDate_(end);});
+  const duplicate=optionalDataRows_(APP.sheets.referenceTargets).some(function(r){return referenceKey_(r[3])===referenceKey_(reference)&&isoDate_(r[1])===isoDate_(start)&&isoDate_(r[2])===isoDate_(end);});
   if(duplicate) throw new Error('Bu referans ve dönem için hedef zaten var.');
   const id=makeId_('HDF');
   getDb_().getSheetByName(APP.sheets.referenceTargets).appendRow([id,start,end,reference,pledgeTarget,collectionTarget,true,cleanText_(payload.note,300),new Date()]);
@@ -1169,7 +1169,7 @@ function saveBulkReferenceTargets(token, payload) {
   let result=null;
   withLock_(function(){
     resetRequestCache_();
-    const existing={};optionalDataRows_(APP.sheets.referenceTargets).forEach(function(r){existing[normalizeKey_(r[3])+'|'+isoDate_(r[1])+'|'+isoDate_(r[2])]=true;});
+    const existing={};optionalDataRows_(APP.sheets.referenceTargets).forEach(function(r){existing[referenceKey_(r[3])+'|'+isoDate_(r[1])+'|'+isoDate_(r[2])]=true;});
     const rows=[];let skipped=0;const note=cleanText_(payload.note,300);
     names.forEach(function(name){const key=normalizeKey_(name)+'|'+range.startIso+'|'+range.endIso;if(existing[key]){skipped++;return;}existing[key]=true;rows.push([makeId_('HDF'),range.start,range.end,name,pledgeTarget,collectionTarget,true,note,new Date()]);});
     if(rows.length) appendRows_(getDb_().getSheetByName(APP.sheets.referenceTargets),rows,HEADERS.referenceTargets.length);
@@ -1192,7 +1192,7 @@ function copyReferenceTargetsMonth(token, payload) {
     if(!sourceRows.length) throw new Error(source.label+' döneminde devredilecek aktif hedef bulunamadı.');
     const existing={};all.forEach(function(r){existing[normalizeKey_(r[3])+'|'+isoDate_(r[1])+'|'+isoDate_(r[2])]=true;});
     const rows=[];let skipped=0;
-    sourceRows.forEach(function(r){const key=normalizeKey_(r[3])+'|'+target.startIso+'|'+target.endIso;if(existing[key]){skipped++;return;}existing[key]=true;const sourceNote=cleanText_(r[7],220);const carryNote=source.label+' döneminden devredildi';rows.push([makeId_('HDF'),target.start,target.end,r[3],Number(r[4])||0,Number(r[5])||0,true,cleanText_((sourceNote?sourceNote+' · ':'')+carryNote,300),new Date()]);});
+    sourceRows.forEach(function(r){const key=referenceKey_(r[3])+'|'+target.startIso+'|'+target.endIso;if(existing[key]){skipped++;return;}existing[key]=true;const sourceNote=cleanText_(r[7],220);const carryNote=source.label+' döneminden devredildi';rows.push([makeId_('HDF'),target.start,target.end,r[3],Number(r[4])||0,Number(r[5])||0,true,cleanText_((sourceNote?sourceNote+' · ':'')+carryNote,300),new Date()]);});
     if(rows.length) appendRows_(getDb_().getSheetByName(APP.sheets.referenceTargets),rows,HEADERS.referenceTargets.length);
     audit_(session.email,'AYA_DEVREDİLDİ','Referans Hedefleri',source.key+' -> '+target.key,rows.length+' hedef / '+skipped+' atlandı');
     result={ok:true,created:rows.length,skipped:skipped,sourcePeriod:source.label,targetPeriod:target.label};
@@ -1209,7 +1209,7 @@ function updateReferenceTarget(token,payload) {
   if(end<start) throw new Error('Bitiş tarihi başlangıçtan önce olamaz.');
   const pledgeTarget=nonNegativeNumber_(payload.pledgeTarget,'Temin hedefi'), collectionTarget=nonNegativeNumber_(payload.collectionTarget,'Tahsilat hedefi');
   if(pledgeTarget<=0&&collectionTarget<=0) throw new Error('En az bir hedef sıfırdan büyük olmalıdır.');
-  const duplicate=optionalDataRows_(APP.sheets.referenceTargets).some(function(r){return r[0]!==id&&normalizeKey_(r[3])===normalizeKey_(reference)&&isoDate_(r[1])===isoDate_(start)&&isoDate_(r[2])===isoDate_(end);});
+  const duplicate=optionalDataRows_(APP.sheets.referenceTargets).some(function(r){return r[0]!==id&&referenceKey_(r[3])===referenceKey_(reference)&&isoDate_(r[1])===isoDate_(start)&&isoDate_(r[2])===isoDate_(end);});
   if(duplicate) throw new Error('Bu referans ve dönem için başka bir hedef var.');
   getDb_().getSheetByName(APP.sheets.referenceTargets).getRange(row.row,2,1,7).setValues([[start,end,reference,pledgeTarget,collectionTarget,row.values[6]===true,cleanText_(payload.note,300)]]);
   audit_(session.email,'DÜZELTİLDİ','Referans Hedefi',id,reference);
@@ -2032,11 +2032,11 @@ function buildAppData_(session, filters) {
   const applyToLists = filters.applyToLists === true || String(filters.applyToLists) === 'true';
   const admin = session.role === 'YÖNETİCİ';
   const approver = isApproverSession_(session);
-  const accessiblePledgeRows = dataRows_(APP.sheets.pledges).filter(r => approver || normalizeKey_(r[6]) === normalizeKey_(session.reference));
+  const accessiblePledgeRows = dataRows_(APP.sheets.pledges).filter(r => approver || referenceKey_(r[6]) === referenceKey_(session.reference));
   const doubtfulIds = {};
   accessiblePledgeRows.forEach(function(r) { if (String(r[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') doubtfulIds[r[0]] = true; });
   const pledgeRows = accessiblePledgeRows.filter(function(r) { return !doubtfulIds[r[0]]; });
-  const allCollectionRows = dataRows_(APP.sheets.collections).filter(function(r) { return (approver || normalizeKey_(r[5]) === normalizeKey_(session.reference)) && !doubtfulIds[r[2]]; });
+  const allCollectionRows = dataRows_(APP.sheets.collections).filter(function(r) { return (approver || referenceKey_(r[5]) === referenceKey_(session.reference)) && !doubtfulIds[r[2]]; });
   const collectionRows = allCollectionRows.filter(isCollectionApprovedRow_);
   const periodCollections = collectionRows.filter(r => inRange_(r[1], start, end));
   const periodPledges = pledgeRows.filter(r => inRange_(r[11], start, end));
@@ -2128,10 +2128,11 @@ function groupDonations_(pledges, collections, periodCollections) {
 
 function groupReferences_(pledges, collections, periodCollections, periodPledges) {
   const map = {};
-  pledges.forEach(r => { const key=r[6]||'Referanssız'; const x=map[key]||(map[key]={name:key,count:0,pledged:0,collected:0,period:0,periodPledged:0}); x.count++; x.pledged+=Number(r[7]||0); });
-  collections.forEach(r => { const key=r[5]||'Referanssız'; const x=map[key]||(map[key]={name:key,count:0,pledged:0,collected:0,period:0,periodPledged:0}); x.collected+=Number(r[7]||0); });
-  periodCollections.forEach(r => { const key=r[5]||'Referanssız'; const x=map[key]||(map[key]={name:key,count:0,pledged:0,collected:0,period:0,periodPledged:0}); x.period+=Number(r[7]||0); });
-  (periodPledges||[]).forEach(r => { const key=r[6]||'Referanssız'; const x=map[key]||(map[key]={name:key,count:0,pledged:0,collected:0,period:0,periodPledged:0}); x.periodPledged+=Number(r[7]||0); });
+  function item_(value) { const name=cleanText_(value,120)||'Referanssız'; const key=referenceKey_(name)||'referanssiz'; return map[key]||(map[key]={name:name,count:0,pledged:0,collected:0,period:0,periodPledged:0}); }
+  pledges.forEach(r => { const x=item_(r[6]); x.count++; x.pledged+=Number(r[7]||0); });
+  collections.forEach(r => { const x=item_(r[5]); x.collected+=Number(r[7]||0); });
+  periodCollections.forEach(r => { const x=item_(r[5]); x.period+=Number(r[7]||0); });
+  (periodPledges||[]).forEach(r => { const x=item_(r[6]); x.periodPledged+=Number(r[7]||0); });
   return Object.keys(map).map(k => Object.assign(map[k], { remaining: map[k].pledged-map[k].collected, rate: map[k].pledged ? map[k].collected/map[k].pledged : 0 })).sort((a,b)=>b.period-a.period);
 }
 
@@ -2192,12 +2193,12 @@ function recentAccountingImports_(limit) {
 function referenceTargetData_(session, pledges, collections) {
   const admin=isApproverSession_(session);
   const today=isoDate_(new Date());
-  const rows=optionalDataRows_(APP.sheets.referenceTargets).filter(function(r){return admin||(r[6]===true&&normalizeKey_(r[3])===normalizeKey_(session.reference));});
+  const rows=optionalDataRows_(APP.sheets.referenceTargets).filter(function(r){return admin||(r[6]===true&&referenceKey_(r[3])===referenceKey_(session.reference));});
   const items=rows.map(function(r){
     const start=new Date(r[1]), end=new Date(r[2]); end.setHours(23,59,59,999);
-    const key=normalizeKey_(r[3]);
-    const actualPledged=(pledges||[]).filter(function(p){return normalizeKey_(p[6])===key&&inRange_(p[11],start,end);}).reduce(function(s,p){return s+(Number(p[7])||0);},0);
-    const actualCollected=(collections||[]).filter(function(c){return normalizeKey_(c[5])===key&&inRange_(c[1],start,end);}).reduce(function(s,c){return s+(Number(c[7])||0);},0);
+    const key=referenceKey_(r[3]);
+    const actualPledged=(pledges||[]).filter(function(p){return referenceKey_(p[6])===key&&inRange_(p[11],start,end);}).reduce(function(s,p){return s+(Number(p[7])||0);},0);
+    const actualCollected=(collections||[]).filter(function(c){return referenceKey_(c[5])===key&&inRange_(c[1],start,end);}).reduce(function(s,c){return s+(Number(c[7])||0);},0);
     const pledgeTarget=Number(r[4])||0, collectionTarget=Number(r[5])||0;
     const startIso=isoDate_(r[1]),endIso=isoDate_(r[2]);
     const reached=(pledgeTarget<=0||actualPledged>=pledgeTarget)&&(collectionTarget<=0||actualCollected>=collectionTarget);
@@ -2379,10 +2380,10 @@ function uniquePledgePersonnelNames_(rows) {
 
 function uniqueReferenceNames_() {
   const map={};
-  dataRows_(APP.sheets.users).forEach(function(r){const name=cleanText_(r[4],120);if(name)map[normalizeKey_(name)]=name;});
+  dataRows_(APP.sheets.users).forEach(function(r){const name=cleanText_(r[4],120);if(name)map[referenceKey_(name)]=name;});
   const studentIds={};
-  dataRows_(APP.sheets.pledges).forEach(function(r){if(isStudentPledgeRow_(r)){studentIds[String(r[0])]=true;return;}const name=cleanText_(r[6],120);if(name&&!map[normalizeKey_(name)])map[normalizeKey_(name)]=name;});
-  dataRows_(APP.sheets.collections).forEach(function(r){if(studentIds[String(r[2])])return;const name=cleanText_(r[5],120);if(name&&!map[normalizeKey_(name)])map[normalizeKey_(name)]=name;});
+  dataRows_(APP.sheets.pledges).forEach(function(r){if(isStudentPledgeRow_(r)){studentIds[String(r[0])]=true;return;}const name=cleanText_(r[6],120);if(name&&!map[referenceKey_(name)])map[referenceKey_(name)]=name;});
+  dataRows_(APP.sheets.collections).forEach(function(r){if(studentIds[String(r[2])])return;const name=cleanText_(r[5],120);if(name&&!map[referenceKey_(name)])map[referenceKey_(name)]=name;});
   return Object.keys(map).map(function(k){return map[k];}).sort(function(a,b){return a.localeCompare(b,'tr');});
 }
 
@@ -2392,6 +2393,24 @@ function isStudentPledgeRow_(row) {
 
 function normalizeKey_(value) {
   return String(value || '').trim().toLocaleLowerCase('tr-TR');
+}
+
+function referenceKey_(value) {
+  return String(value || '')
+    .normalize('NFKC')
+    .replace(/[\u200B-\u200D\uFEFF]/g, '')
+    .replace(/\u00A0/g, ' ')
+    .trim()
+    .toLocaleLowerCase('tr-TR')
+    .replace(/[ıi]/g, 'i')
+    .replace(/ş/g, 's')
+    .replace(/ğ/g, 'g')
+    .replace(/ü/g, 'u')
+    .replace(/ö/g, 'o')
+    .replace(/ç/g, 'c')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function createSheet_(ss, name, headers, existing) {
