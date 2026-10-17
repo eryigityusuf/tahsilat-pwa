@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 5,
+  cacheSchemaVersion: 6,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -29,7 +29,7 @@ const HEADERS = Object.freeze({
   users: ['Kullanıcı ID','Ad Soyad','E-posta','Rol','Referans Adı','PIN Salt','PIN Özeti','Aktif','Oluşturma Tarihi'],
   types: ['Bağış Türü','Aktif'],
   pledges: ['Taahhüt ID','Yıl','Bağış Türü','Ad Soyad','Telefon','Ödeyen','Referans','Taahhüt Tutarı','Ödenen','Kalan','Durum','Taahhüt Tarihi','Oluşturan','Oluşturma Zamanı','Personel','Alacak Durumu','Kayıt Kaynağı'],
-  collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı'],
+  collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni'],
   referenceTargets: ['Hedef ID','Başlangıç','Bitiş','Referans','Temin Hedefi','Tahsilat Hedefi','Aktif','Açıklama','Oluşturma Zamanı'],
   cashAccounts: ['Hesap ID','Hesap Adı','Hesap Türü','Açılış Bakiyesi','Aktif','Açıklama','Oluşturma Zamanı'],
   loans: ['Borç ID','Alım Tarihi','Borç Veren','Alınan Tutar','Geri Ödenen','Kalan Borç','Durum','Hesap ID','Hesap Adı','Açıklama','Oluşturma Zamanı'],
@@ -156,6 +156,17 @@ function upgradeSystem() {
     const added = HEADERS.collections.slice(start - 1);
     collections.getRange(1, start, 1, added.length).setValues([added]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#163A5F');
   }
+  if (collections.getLastRow() > 1) {
+    const approvalRange = collections.getRange(2, 15, collections.getLastRow() - 1, 4);
+    const approvalValues = approvalRange.getValues().map(function(r) {
+      const approvalStatus = cleanText_(r[0], 30);
+      if (approvalStatus) {
+        return [approvalStatus, cleanText_(r[1], 120), r[2] || '', cleanText_(r[3], 300)];
+      }
+      return ['ONAYLANDI', 'SİSTEM GEÇİŞİ', new Date(), ''];
+    });
+    approvalRange.setValues(approvalValues);
+  }
   migrateCollectionAccounts_(ss);
   [APP.sheets.staffPayments, APP.sheets.teacherPayments].forEach(function(sheetName) {
     const sh = ss.getSheetByName(sheetName);
@@ -215,7 +226,7 @@ function importExistingPledges(sourceSpreadsheetId, sourceSheetName) {
     ]);
     if (paid > 0) collectionRows.push([
       makeId_('THS'), pledgeDate, id, fullName, type, reference, payer, paid,
-      'Devir', 'Mevcut listeden açılış tahsilatı', 'TOPLU_AKTARIM', new Date(), 'HSP-DEVIR', 'Devir / Belirsiz'
+      'Devir', 'Mevcut listeden açılış tahsilatı', 'TOPLU_AKTARIM', new Date(), 'HSP-DEVIR', 'Devir / Belirsiz', 'ONAYLANDI', 'TOPLU_AKTARIM', new Date(), ''
     ]);
   });
 
@@ -303,7 +314,7 @@ function generatePersonnelPledgePdf(token, personnelName) {
   if (!pledges.length) throw new Error('Bu personele bağlı taahhüt bulunamadı.');
   const ids = {};
   pledges.forEach(function(r) { ids[r[0]] = true; });
-  const collections = dataRows_(APP.sheets.collections).filter(function(r) { return ids[r[2]]; });
+  const collections = dataRows_(APP.sheets.collections).filter(function(r) { return ids[r[2]] && isCollectionApprovedRow_(r); });
   const active = pledges.filter(function(r) { return String(r[15] || 'AKTİF').toUpperCase() !== 'ŞÜPHELİ'; });
   const doubtful = pledges.filter(function(r) { return String(r[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ'; });
   const doc = DocumentApp.create('Personel Taahhüt Tahsilat Raporu - ' + personnel);
@@ -459,7 +470,7 @@ function savePledge(token, payload) {
   const date = parseDate_(payload.pledgeDate, 'Taahhüt tarihi');
   const donationType = cleanText_(payload.donationType, 80);
   const fullName = cleanText_(payload.fullName, 120);
-  const reference = session.role === 'YÖNETİCİ' ? cleanText_(payload.reference, 100) : session.reference;
+  const reference = isApproverSession_(session) ? cleanText_(payload.reference, 100) : session.reference;
   if (!donationType || !fullName || !reference) throw new Error('Bağış türü, ad soyad ve referans zorunludur.');
   const id = makeId_('TAA');
   withLock_(function() {
@@ -605,7 +616,7 @@ function bulkSavePledges(token, payload) {
       ]);
       if (paid > 0) collectionRows.push([
         makeId_('THS'), pledgeDate, id, account, type, reference, payer, paid,
-        'Devir', 'Toplu taahhüt aktarımından açılış tahsilatı', session.email, new Date(), 'HSP-DEVIR', 'Devir / Belirsiz'
+        'Devir', 'Toplu taahhüt aktarımından açılış tahsilatı', session.email, new Date(), 'HSP-DEVIR', 'Devir / Belirsiz', 'ONAYLANDI', session.email, new Date(), ''
       ]);
     } catch (e) {
       errors.push((index + 2) + '. satır: ' + e.message);
@@ -698,7 +709,7 @@ function bulkImportAccounting(token, payload) {
           if(String(pledge[15]||'AKTİF').toUpperCase()==='ŞÜPHELİ') throw new Error('Taahhüt şüpheli alacaklarda');
           if(amount>(Number(pledge[9])||0)) throw new Error('Tahsilat kalan taahhüt bakiyesinden büyük');
           systemId=makeId_('THS');
-          collectionAdds.push([systemId,date,pledge[0],pledge[3],pledge[2],pledge[6],pledge[5],amount,method,note||('Muhasebe aktarımı: '+externalId),session.email,new Date(),account.id,account.name]);
+          collectionAdds.push([systemId,date,pledge[0],pledge[3],pledge[2],pledge[6],pledge[5],amount,method,note||('Muhasebe aktarımı: '+externalId),session.email,new Date(),account.id,account.name,'ONAYLANDI',session.email,new Date(),'']);
           pledge[8]=Math.round(((Number(pledge[8])||0)+amount)*100)/100;
           pledge[9]=Math.round(((Number(pledge[7])||0)-pledge[8])*100)/100;
           pledge[10]=pledge[9]<=0?'Kapandı':'Kısmi';
@@ -707,7 +718,7 @@ function bulkImportAccounting(token, payload) {
         } else if(type==='HIZLI BAĞIŞ') {
           if(!name||!detailType||!reference) throw new Error('Hızlı bağışta ADI/HESAP, BAĞIŞ/ÖDEME TÜRÜ ve REFERANS zorunludur');
           systemId=makeId_('HBG');
-          collectionAdds.push([systemId,date,'',name,detailType,reference,payer,amount,method,note||('Muhasebe aktarımı: '+externalId),session.email,new Date(),account.id,account.name]);
+          collectionAdds.push([systemId,date,'',name,detailType,reference,payer,amount,method,note||('Muhasebe aktarımı: '+externalId),session.email,new Date(),account.id,account.name,'ONAYLANDI',session.email,new Date(),'']);
           cashDeltas[account.id]=(cashDeltas[account.id]||0)+amount;
           result.collections++;
         } else {
@@ -764,6 +775,30 @@ function appendRows_(sheet, rows, width) {
   if(rows.length)sheet.getRange(sheet.getLastRow()+1,1,rows.length,width).setValues(rows);
 }
 
+function isApproverSession_(session) {
+  return session && (session.role === 'YÖNETİCİ' || session.role === 'MUHASEBE SORUMLUSU');
+}
+
+function collectionApprovalStatus_(row) {
+  return String((row || [])[14] || 'ONAYLANDI').toUpperCase();
+}
+
+function isCollectionApprovedRow_(row) {
+  return collectionApprovalStatus_(row) === 'ONAYLANDI';
+}
+
+function collectionApprovalMeta_(session) {
+  return isApproverSession_(session)
+    ? ['ONAYLANDI', session.email, new Date(), '']
+    : ['BEKLİYOR', '', '', ''];
+}
+
+function pendingAmountForPledge_(pledgeId, excludeCollectionId) {
+  return dataRows_(APP.sheets.collections).filter(function(r) {
+    return r[2] === pledgeId && r[0] !== excludeCollectionId && collectionApprovalStatus_(r) === 'BEKLİYOR';
+  }).reduce(function(sum, r) { return sum + (Number(r[7]) || 0); }, 0);
+}
+
 function saveCollection(token, payload) {
   const session = requireSession_(token);
   payload = payload || {};
@@ -777,22 +812,25 @@ function saveCollection(token, payload) {
     const current = findRowBy_(APP.sheets.pledges, 1, pledgeId);
     if (!current) throw new Error('Taahhüt bulunamadı.');
     if (String(current.values[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') throw new Error('Bu kayıt şüpheli alacaklarda. Tahsilat eklemeden önce aktife geri alın.');
-    if (session.role !== 'YÖNETİCİ' && normalizeKey_(current.values[6]) !== normalizeKey_(session.reference)) throw new Error('Bu kayda erişiminiz yok.');
-    if (amount > (Number(current.values[9]) || 0)) throw new Error('Tahsilat kalan bakiyeden büyük olamaz.');
+    if (!isApproverSession_(session) && normalizeKey_(current.values[6]) !== normalizeKey_(session.reference)) throw new Error('Bu kayda erişiminiz yok.');
+    const available = Math.max(0, (Number(current.values[9]) || 0) - pendingAmountForPledge_(pledgeId, ''));
+    if (amount > available) throw new Error('Tahsilat, kalan ve onay bekleyen kayıtlar dikkate alındığında kullanılabilir ' + moneyText_(available) + ' tutarından büyük olamaz.');
     const account = findRowBy_(APP.sheets.cashAccounts, 1, accountId);
     if (!account || account.values[4] !== true) throw new Error('Aktif bir kasa veya banka hesabı seçin.');
     const ss = getDb_();
     appendRows_(ss.getSheetByName(APP.sheets.collections), [[
       id, date, current.values[0], current.values[3], current.values[2], current.values[6],
       current.values[5], amount, cleanText_(payload.method, 50), cleanText_(payload.note, 300), session.email, new Date(), account.values[0], account.values[1]
-    ]], HEADERS.collections.length);
-    const paid = Number(current.values[8] || 0) + amount;
-    const balance = Number(current.values[7] || 0) - paid;
-    const status = balance <= 0 ? 'Kapandı' : 'Kısmi';
-    ss.getSheetByName(APP.sheets.pledges).getRange(current.row, 9, 1, 3).setValues([[paid, balance, status]]);
-    audit_(session.email, 'EKLENDİ', 'Tahsilat', id, amount + ' TL / ' + current.values[0]);
+    ].concat(collectionApprovalMeta_(session))], HEADERS.collections.length);
+    if (isApproverSession_(session)) {
+      resetRequestCache_();
+      recalculatePledge_(pledgeId);
+      audit_(session.email, 'EKLENDİ_ONAYLANDI', 'Tahsilat', id, amount + ' TL / ' + current.values[0]);
+    } else {
+      audit_(session.email, 'ONAYA_GÖNDERİLDİ', 'Tahsilat', id, amount + ' TL / ' + current.values[0]);
+    }
   });
-  return {ok:true};
+  return {ok:true, approvalStatus:isApproverSession_(session)?'ONAYLANDI':'BEKLİYOR'};
 }
 
 function saveBulkCollections(token, payload) {
@@ -826,20 +864,22 @@ function saveBulkCollections(token, payload) {
       if (!record) throw new Error('Taahhüt bulunamadı: ' + pledgeId);
       const pledge = record.values;
       if (String(pledge[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') throw new Error(pledge[3] + ' kaydı şüpheli alacaklarda. Önce aktife geri alın.');
-      if (session.role !== 'YÖNETİCİ' && normalizeKey_(pledge[6]) !== normalizeKey_(session.reference)) throw new Error(pledge[3] + ' kaydına erişiminiz yok.');
+      if (!isApproverSession_(session) && normalizeKey_(pledge[6]) !== normalizeKey_(session.reference)) throw new Error(pledge[3] + ' kaydına erişiminiz yok.');
       const amount = positiveNumber_(item.amount, pledge[3] + ' tahsilat tutarı');
-      const remaining = Number(pledge[9]) || 0;
+      const remaining = Math.max(0, (Number(pledge[9]) || 0) - pendingAmountForPledge_(pledgeId, ''));
       if (amount > remaining) throw new Error(pledge[3] + ' için tahsilat kalan ' + moneyText_(remaining) + ' tutarından büyük olamaz.');
-      const paid = Math.round(((Number(pledge[8]) || 0) + amount) * 100) / 100;
-      const balance = Math.round(((Number(pledge[7]) || 0) - paid) * 100) / 100;
-      pledge[8] = paid;
-      pledge[9] = Math.max(0, balance);
-      pledge[10] = balance <= 0 ? 'Kapandı' : 'Kısmi';
+      if (isApproverSession_(session)) {
+        const paid = Math.round(((Number(pledge[8]) || 0) + amount) * 100) / 100;
+        const balance = Math.round(((Number(pledge[7]) || 0) - paid) * 100) / 100;
+        pledge[8] = paid;
+        pledge[9] = Math.max(0, balance);
+        pledge[10] = balance <= 0 ? 'Kapandı' : 'Kısmi';
+      }
       total += amount;
       collectionRows.push([
         makeId_('THS') + '-' + (index + 1), date, pledge[0], pledge[3], pledge[2], pledge[6], pledge[5], amount,
         method, note, session.email, new Date(), account.values[0], account.values[1]
-      ]);
+      ].concat(collectionApprovalMeta_(session)));
     });
 
     const ss = getDb_();
@@ -847,14 +887,14 @@ function saveBulkCollections(token, payload) {
     const firstAddedRow = collectionSheet.getLastRow() + 1;
     collectionSheet.getRange(firstAddedRow, 1, collectionRows.length, HEADERS.collections.length).setValues(collectionRows);
     try {
-      if (pledgeRows.length) ss.getSheetByName(APP.sheets.pledges).getRange(2, 9, pledgeRows.length, 3).setValues(pledgeRows.map(function(r) { return [r[8], r[9], r[10]]; }));
+      if (isApproverSession_(session) && pledgeRows.length) ss.getSheetByName(APP.sheets.pledges).getRange(2, 9, pledgeRows.length, 3).setValues(pledgeRows.map(function(r) { return [r[8], r[9], r[10]]; }));
     } catch (e) {
       collectionSheet.deleteRows(firstAddedRow, collectionRows.length);
       throw e;
     }
     total = Math.round(total * 100) / 100;
-    audit_(session.email, 'TOPLU_TAHSİLAT', 'Tahsilat', '', collectionRows.length + ' hareket / ' + total + ' TL / ' + account.values[1]);
-    result = { ok:true, count:collectionRows.length, total:total };
+    audit_(session.email, isApproverSession_(session) ? 'TOPLU_TAHSİLAT_ONAYLANDI' : 'TOPLU_TAHSİLAT_ONAYA_GÖNDERİLDİ', 'Tahsilat', '', collectionRows.length + ' hareket / ' + total + ' TL / ' + account.values[1]);
+    result = { ok:true, count:collectionRows.length, total:total, approvalStatus:isApproverSession_(session)?'ONAYLANDI':'BEKLİYOR' };
   });
   return result;
 }
@@ -866,7 +906,7 @@ function saveQuickDonation(token, payload) {
   const date = parseDate_(payload.date, 'Bağış tarihi');
   const donationType = cleanText_(payload.donationType, 80);
   const fullName = cleanText_(payload.fullName, 120);
-  const reference = session.role === 'YÖNETİCİ' ? cleanText_(payload.reference, 100) : session.reference;
+  const reference = isApproverSession_(session) ? cleanText_(payload.reference, 100) : session.reference;
   const account = findRowBy_(APP.sheets.cashAccounts, 1, cleanText_(payload.accountId, 60));
   if (!donationType || !fullName || !reference) throw new Error('Bağış türü, bağışçı ve referans zorunludur.');
   if (!account || account.values[4] !== true) throw new Error('Aktif bir kasa veya banka hesabı seçin.');
@@ -875,14 +915,14 @@ function saveQuickDonation(token, payload) {
     appendRows_(getDb_().getSheetByName(APP.sheets.collections), [[
       id, date, '', fullName, donationType, reference, cleanText_(payload.payer, 120), amount,
       cleanText_(payload.method, 50), cleanText_(payload.note, 300), session.email, new Date(), account.values[0], account.values[1]
-    ]], HEADERS.collections.length);
-    audit_(session.email, 'HIZLI_BAĞIŞ', 'Doğrudan Gelir', id, fullName + ' / ' + amount + ' TL / ' + account.values[1]);
+    ].concat(collectionApprovalMeta_(session))], HEADERS.collections.length);
+    audit_(session.email, isApproverSession_(session) ? 'HIZLI_BAĞIŞ_ONAYLANDI' : 'HIZLI_BAĞIŞ_ONAYA_GÖNDERİLDİ', 'Doğrudan Gelir', id, fullName + ' / ' + amount + ' TL / ' + account.values[1]);
   });
-  return {ok:true};
+  return {ok:true, approvalStatus:isApproverSession_(session)?'ONAYLANDI':'BEKLİYOR'};
 }
 
 function updateCollection(token, payload) {
-  const session = requireAdmin_(token);
+  const session = requireApprover_(token);
   payload = payload || {};
   const id = cleanText_(payload.id, 60);
   const amount = positiveNumber_(payload.amount, 'Tahsilat tutarı');
@@ -892,12 +932,13 @@ function updateCollection(token, payload) {
   withLock_(function() {
     const current = findRowBy_(APP.sheets.collections, 1, id);
     if (!current) throw new Error('Tahsilat bulunamadı.');
+    const wasApproved = isCollectionApprovedRow_(current.values);
     const pledgeId = String(current.values[2] || '');
     const pledge = pledgeId ? findRowBy_(APP.sheets.pledges, 1, pledgeId) : null;
     if (pledgeId && !pledge) throw new Error('Bağlı taahhüt bulunamadı.');
     if (pledge && String(pledge.values[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') throw new Error('Bu kayıt şüpheli alacaklarda. Önce aktife geri alın.');
     if (pledge) {
-      const allowed = (Number(pledge.values[9]) || 0) + (Number(current.values[7]) || 0);
+      const allowed = Math.max(0, (Number(pledge.values[9]) || 0) + (wasApproved ? (Number(current.values[7]) || 0) : 0) - pendingAmountForPledge_(pledgeId, id));
       if (amount > allowed) throw new Error('Tahsilat kalan bakiyeden büyük olamaz.');
     }
     let directMeta = null;
@@ -908,16 +949,19 @@ function updateCollection(token, payload) {
       if (!donationType || !fullName || !reference) throw new Error('Bağış türü, bağışçı ve referans zorunludur.');
       directMeta = [fullName, donationType, reference, cleanText_(payload.payer, 120)];
     }
-    const deltas = {};
-    const oldAccountId = String(current.values[12] || '');
-    if (oldAccountId) deltas[oldAccountId] = (deltas[oldAccountId] || 0) - (Number(current.values[7]) || 0);
-    deltas[account.values[0]] = (deltas[account.values[0]] || 0) + amount;
-    assertCashDeltas_(deltas, 'Tahsilat düzeltme');
+    if (wasApproved) {
+      const deltas = {};
+      const oldAccountId = String(current.values[12] || '');
+      if (oldAccountId) deltas[oldAccountId] = (deltas[oldAccountId] || 0) - (Number(current.values[7]) || 0);
+      deltas[account.values[0]] = (deltas[account.values[0]] || 0) + amount;
+      assertCashDeltas_(deltas, 'Tahsilat düzeltme');
+    }
     const sh = getDb_().getSheetByName(APP.sheets.collections);
     sh.getRange(current.row, 2).setValue(date);
     if (directMeta) sh.getRange(current.row, 4, 1, 4).setValues([directMeta]);
     sh.getRange(current.row, 8, 1, 3).setValues([[amount, cleanText_(payload.method, 50), cleanText_(payload.note, 300)]]);
     sh.getRange(current.row, 13, 1, 2).setValues([[account.values[0], account.values[1]]]);
+    resetRequestCache_();
     if (pledge) recalculatePledge_(pledgeId);
     audit_(session.email, 'DÜZELTİLDİ', 'Tahsilat', id, amount + ' TL');
   });
@@ -925,21 +969,82 @@ function updateCollection(token, payload) {
 }
 
 function deleteCollection(token, collectionId) {
-  const session = requireAdmin_(token);
+  const session = requireApprover_(token);
   const id = cleanText_(collectionId, 60);
   withLock_(function() {
     const current = findRowBy_(APP.sheets.collections, 1, id);
     if (!current) throw new Error('Tahsilat bulunamadı.');
     const pledgeId = current.values[2];
     const pledge = findRowBy_(APP.sheets.pledges, 1, pledgeId);
-    if (!pledge || String(pledge.values[15] || 'AKTİF').toUpperCase() !== 'ŞÜPHELİ') {
+    if (isCollectionApprovedRow_(current.values) && (!pledge || String(pledge.values[15] || 'AKTİF').toUpperCase() !== 'ŞÜPHELİ')) {
       const delta = {}; delta[current.values[12]] = -(Number(current.values[7]) || 0);
       assertCashDeltas_(delta, 'Tahsilat silme');
     }
     const detail = (Number(current.values[7]) || 0) + ' TL / ' + pledgeId;
     getDb_().getSheetByName(APP.sheets.collections).deleteRow(current.row);
+    resetRequestCache_();
     if (pledge) recalculatePledge_(pledgeId);
     audit_(session.email, 'SİLİNDİ', 'Tahsilat', id, detail);
+  });
+  return {ok:true};
+}
+
+function approveCollection(token, collectionId) {
+  const session = requireApprover_(token);
+  const id = cleanText_(collectionId, 60);
+  withLock_(function() {
+    const current = findRowBy_(APP.sheets.collections, 1, id);
+    if (!current) throw new Error('Tahsilat bulunamadı.');
+    if (collectionApprovalStatus_(current.values) !== 'BEKLİYOR') throw new Error('Yalnızca onay bekleyen tahsilatlar onaylanabilir.');
+    const account = findRowBy_(APP.sheets.cashAccounts, 1, current.values[12]);
+    if (!account || account.values[4] !== true) throw new Error('Tahsilatın seçili kasa veya banka hesabı aktif değil. Önce kaydı düzeltin.');
+    const pledgeId = String(current.values[2] || '');
+    if (pledgeId) {
+      const pledge = findRowBy_(APP.sheets.pledges, 1, pledgeId);
+      if (!pledge) throw new Error('Bağlı taahhüt bulunamadı.');
+      if (String(pledge.values[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') throw new Error('Taahhüt şüpheli alacaklarda. Önce aktife geri alın.');
+      if ((Number(current.values[7]) || 0) > (Number(pledge.values[9]) || 0)) throw new Error('Tahsilat mevcut kalan bakiyeden büyük. Tutarı düzeltin.');
+    }
+    const sh = getDb_().getSheetByName(APP.sheets.collections);
+    sh.getRange(current.row, 15, 1, 4).setValues([['ONAYLANDI', session.email, new Date(), '']]);
+    resetRequestCache_();
+    if (pledgeId) recalculatePledge_(pledgeId);
+    audit_(session.email, 'ONAYLANDI', 'Tahsilat', id, (Number(current.values[7]) || 0) + ' TL / ' + current.values[3]);
+  });
+  return {ok:true};
+}
+
+function rejectCollection(token, collectionId, reason) {
+  const session = requireApprover_(token);
+  const id = cleanText_(collectionId, 60);
+  const rejectionReason = cleanText_(reason, 300);
+  if (!rejectionReason) throw new Error('Red nedeni zorunludur.');
+  withLock_(function() {
+    const current = findRowBy_(APP.sheets.collections, 1, id);
+    if (!current) throw new Error('Tahsilat bulunamadı.');
+    if (collectionApprovalStatus_(current.values) !== 'BEKLİYOR') throw new Error('Yalnızca onay bekleyen tahsilatlar reddedilebilir.');
+    getDb_().getSheetByName(APP.sheets.collections).getRange(current.row, 15, 1, 4).setValues([['REDDEDİLDİ', session.email, new Date(), rejectionReason]]);
+    audit_(session.email, 'REDDEDİLDİ', 'Tahsilat', id, rejectionReason);
+  });
+  return {ok:true};
+}
+
+function reopenCollectionApproval(token, collectionId) {
+  const session = requireApprover_(token);
+  const id = cleanText_(collectionId, 60);
+  withLock_(function() {
+    const current = findRowBy_(APP.sheets.collections, 1, id);
+    if (!current) throw new Error('Tahsilat bulunamadı.');
+    const status = collectionApprovalStatus_(current.values);
+    if (status === 'BEKLİYOR') throw new Error('Tahsilat zaten onay bekliyor.');
+    if (status === 'ONAYLANDI') {
+      const delta = {}; delta[current.values[12]] = -(Number(current.values[7]) || 0);
+      assertCashDeltas_(delta, 'Tahsilat onayını geri alma');
+    }
+    getDb_().getSheetByName(APP.sheets.collections).getRange(current.row, 15, 1, 4).setValues([['BEKLİYOR', '', '', '']]);
+    resetRequestCache_();
+    if (current.values[2]) recalculatePledge_(current.values[2]);
+    audit_(session.email, 'ONAY_GERİ_ALINDI', 'Tahsilat', id, (Number(current.values[7]) || 0) + ' TL / ' + current.values[3]);
   });
   return {ok:true};
 }
@@ -1001,7 +1106,11 @@ function deleteAllPledges(token, confirmation) {
     const activeIds = {};
     dataRows_(APP.sheets.pledges).forEach(function(r) { if (String(r[15] || 'AKTİF').toUpperCase() !== 'ŞÜPHELİ') activeIds[r[0]] = true; });
     const deltas = {};
-    dataRows_(APP.sheets.collections).forEach(function(r) { if (activeIds[r[2]] && r[12]) deltas[r[12]] = (deltas[r[12]] || 0) - (Number(r[7]) || 0); });
+    dataRows_(APP.sheets.collections).forEach(function(r) {
+      if (activeIds[r[2]] && r[12] && isCollectionApprovedRow_(r)) {
+        deltas[r[12]] = (deltas[r[12]] || 0) - (Number(r[7]) || 0);
+      }
+    });
     assertCashDeltas_(deltas, 'Toplu taahhüt silme');
     backupUrl = backupPledgeData_(pledgeSheet, collectionSheet);
     if (pledgeCount) pledgeSheet.getRange(2, 1, pledgeCount, pledgeSheet.getLastColumn()).clearContent();
@@ -1827,14 +1936,15 @@ function saveUser(token, payload) {
   const email = normalizeEmail_(payload.email);
   const name = cleanText_(payload.name, 100);
   const reference = cleanText_(payload.reference, 100);
+  const role = normalizeUserRole_(payload.role);
   if (!name) throw new Error('Ad soyad zorunludur.');
-  if (payload.role !== 'YÖNETİCİ' && !reference) throw new Error('Kullanıcı rolü için referans adı zorunludur.');
+  if (role === 'KULLANICI' && !reference) throw new Error('Tahsilat kullanıcısı için referans adı zorunludur.');
   if (findRowBy_(APP.sheets.users, 3, email)) throw new Error('Bu e-posta zaten kayıtlı.');
   validatePin_(payload.pin);
   const salt = Utilities.getUuid();
   const id = makeId_('USR');
   getDb_().getSheetByName(APP.sheets.users).appendRow([
-    id, name, email, payload.role === 'YÖNETİCİ' ? 'YÖNETİCİ' : 'KULLANICI',
+    id, name, email, role,
     reference || name, salt, hashPin_(payload.pin, salt), true, new Date()
   ]);
   audit_(session.email, 'EKLENDİ', 'Kullanıcı', id, email);
@@ -1849,10 +1959,10 @@ function updateUser(token, payload) {
   if (!current) throw new Error('Kullanıcı bulunamadı.');
   const name = cleanText_(payload.name, 100);
   const email = normalizeEmail_(payload.email);
-  const role = payload.role === 'YÖNETİCİ' ? 'YÖNETİCİ' : 'KULLANICI';
+  const role = normalizeUserRole_(payload.role);
   const reference = cleanText_(payload.reference, 100);
   if (!name || !email) throw new Error('Ad soyad ve e-posta zorunludur.');
-  if (role === 'KULLANICI' && !reference) throw new Error('Kullanıcı rolü için referans adı zorunludur.');
+  if (role === 'KULLANICI' && !reference) throw new Error('Tahsilat kullanıcısı için referans adı zorunludur.');
   if (current.values[2] === session.email && role !== 'YÖNETİCİ') throw new Error('Kendi yönetici rolünüzü kaldıramazsınız.');
   const duplicate = dataRows_(APP.sheets.users).some(function(r) { return r[0] !== id && normalizeEmail_(r[2]) === email; });
   if (duplicate) throw new Error('Bu e-posta başka bir kullanıcıda kayıtlı.');
@@ -1888,6 +1998,12 @@ function setUserActive(token, userId, active) {
   return {ok:true};
 }
 
+function normalizeUserRole_(value) {
+  const role = String(value || '').toUpperCase();
+  if (role === 'YÖNETİCİ' || role === 'MUHASEBE SORUMLUSU') return role;
+  return 'KULLANICI';
+}
+
 function reconcileSystem(token) {
   const session=requireAdmin_(token);
   let pledgeCount=0, staffCount=0, teacherCount=0, loanCount=0;
@@ -1910,11 +2026,13 @@ function buildAppData_(session, filters) {
   end.setHours(23, 59, 59, 999);
   const applyToLists = filters.applyToLists === true || String(filters.applyToLists) === 'true';
   const admin = session.role === 'YÖNETİCİ';
-  const accessiblePledgeRows = dataRows_(APP.sheets.pledges).filter(r => admin || normalizeKey_(r[6]) === normalizeKey_(session.reference));
+  const approver = isApproverSession_(session);
+  const accessiblePledgeRows = dataRows_(APP.sheets.pledges).filter(r => approver || normalizeKey_(r[6]) === normalizeKey_(session.reference));
   const doubtfulIds = {};
   accessiblePledgeRows.forEach(function(r) { if (String(r[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') doubtfulIds[r[0]] = true; });
   const pledgeRows = accessiblePledgeRows.filter(function(r) { return !doubtfulIds[r[0]]; });
-  const collectionRows = dataRows_(APP.sheets.collections).filter(function(r) { return (admin || normalizeKey_(r[5]) === normalizeKey_(session.reference)) && !doubtfulIds[r[2]]; });
+  const allCollectionRows = dataRows_(APP.sheets.collections).filter(function(r) { return (approver || normalizeKey_(r[5]) === normalizeKey_(session.reference)) && !doubtfulIds[r[2]]; });
+  const collectionRows = allCollectionRows.filter(isCollectionApprovedRow_);
   const periodCollections = collectionRows.filter(r => inRange_(r[1], start, end));
   const periodPledges = pledgeRows.filter(r => inRange_(r[11], start, end));
   const referencePledgeRows = pledgeRows.filter(function(r) { return !isStudentPledgeRow_(r); });
@@ -1940,7 +2058,7 @@ function buildAppData_(session, filters) {
       pledgeCount: pledgeRows.length
     },
     pledges: (applyToLists?accessiblePledgeRows.filter(function(r){return inRange_(r[11],start,end);}):accessiblePledgeRows).slice().reverse().map(pledgeDto_),
-    collections: (applyToLists?collectionRows.filter(function(r){return inRange_(r[1],start,end);}):collectionRows).slice().reverse().map(collectionDto_),
+    collections: (applyToLists?allCollectionRows.filter(function(r){return inRange_(r[1],start,end);}):allCollectionRows).slice().reverse().map(collectionDto_),
     donationAnalysis: groupDonations_(pledgeRows, collectionRows, periodCollections),
     referenceAnalysis: groupReferences_(referencePledgeRows, referenceCollectionRows, referencePeriodCollections, referencePeriodPledges),
     referenceTargets: referenceTargetData_(session, referencePledgeRows, referenceCollectionRows),
@@ -1948,6 +2066,15 @@ function buildAppData_(session, filters) {
       accounts: optionalDataRows_(APP.sheets.cashAccounts).filter(function(r) { return r[4] === true; }).map(function(r) { return { id:r[0], name:r[1], type:r[2], active:true }; })
     }
   };
+  if (approver) {
+    response.approvals = {
+      items: allCollectionRows.slice().reverse().map(collectionDto_),
+      pendingCount: allCollectionRows.filter(function(r){return collectionApprovalStatus_(r)==='BEKLİYOR';}).length,
+      pendingTotal: allCollectionRows.filter(function(r){return collectionApprovalStatus_(r)==='BEKLİYOR';}).reduce(function(s,r){return s+(Number(r[7])||0);},0)
+    };
+    response.referenceNames = uniqueReferenceNames_();
+    response.cash = cashData_(collectionRows);
+  }
   if (admin) {
     response.users = dataRows_(APP.sheets.users).map(userDto_);
     response.staff = expenseData_('staff', start, end, applyToLists);
@@ -1958,8 +2085,6 @@ function buildAppData_(session, filters) {
     response.teacherPlans = optionalDataRows_(APP.sheets.teacherPlans).map(teacherPlanDto_);
     response.teacherNames = uniqueTeacherNames_();
     response.pledgePersonnelNames = uniquePledgePersonnelNames_(accessiblePledgeRows);
-    response.referenceNames = uniqueReferenceNames_();
-    response.cash = cashData_(collectionRows);
     response.students = studentData_(pledgeRows, collectionRows, periodCollections, start, end, applyToLists);
     response.debts = debtData_(start,end,applyToLists);
     response.accountingImports = recentAccountingImports_(100).map(accountingImportDto_);
@@ -2044,7 +2169,7 @@ function expenseRemainingItems_(commitments) {
 }
 
 function pledgeDto_(r) { return { id:r[0], year:r[1], donationType:r[2], fullName:r[3], phone:r[4], payer:r[5], reference:r[6], amount:n_(r[7]), paid:n_(r[8]), remaining:n_(r[9]), status:r[10], pledgeDate:isoDate_(r[11]), personnel:r[14]||'', receivableStatus:String(r[15]||'AKTİF').toUpperCase(), source:String(r[16]||'BAĞIŞ').toUpperCase() }; }
-function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:r[3], donationType:r[4], reference:r[5], payer:r[6], amount:n_(r[7]), method:r[8], note:r[9], accountId:r[12]||'', accountName:r[13]||'' }; }
+function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:r[3], donationType:r[4], reference:r[5], payer:r[6], amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'' }; }
 function expenseCommitmentDto_(r, kind) { return { id:r[0], name:r[1], paymentType:r[2], period:r[3], total:n_(r[4]), paid:n_(r[5]), remaining:n_(r[6]), dueDate:isoDate_(r[7]), status:r[8], note:r[9], lessonHours:kind==='teacher'?n_(r[11]):0, hourlyRate:kind==='teacher'?n_(r[12]):0 }; }
 function expensePaymentDto_(r, commitment) { return { id:r[0], date:isoDate_(r[1]), commitmentId:r[2], name:r[3], amount:n_(r[4]), method:r[5], note:r[6], accountId:r[8]||'', accountName:r[9]||'', accrualPeriod:commitment?String(commitment[3]||''):'', paymentType:commitment?String(commitment[2]||''):'' }; }
 function staffPlanDto_(r) { return { id:r[0], name:r[1], paymentType:r[2], amount:n_(r[3]), active:r[4]===true, note:r[5] }; }
@@ -2060,7 +2185,7 @@ function recentAccountingImports_(limit) {
   return sh.getRange(last-count+1,1,count,HEADERS.accountingImports.length).getValues().reverse();
 }
 function referenceTargetData_(session, pledges, collections) {
-  const admin=session.role==='YÖNETİCİ';
+  const admin=isApproverSession_(session);
   const today=isoDate_(new Date());
   const rows=optionalDataRows_(APP.sheets.referenceTargets).filter(function(r){return admin||(r[6]===true&&normalizeKey_(r[3])===normalizeKey_(session.reference));});
   const items=rows.map(function(r){
@@ -2117,7 +2242,7 @@ function cashAccountCurrentBalance_(accountId) {
   if(!account)return 0;
   const doubtful={};
   dataRows_(APP.sheets.pledges).forEach(function(r){if(String(r[15]||'AKTİF').toUpperCase()==='ŞÜPHELİ')doubtful[r[0]]=true;});
-  const income=dataRows_(APP.sheets.collections).filter(function(r){return r[12]===accountId&&!doubtful[r[2]];}).reduce(function(s,r){return s+(Number(r[7])||0);},0);
+  const income=dataRows_(APP.sheets.collections).filter(function(r){return r[12]===accountId&&!doubtful[r[2]]&&isCollectionApprovedRow_(r);}).reduce(function(s,r){return s+(Number(r[7])||0);},0);
   const staff=optionalDataRows_(APP.sheets.staffPayments).filter(function(r){return r[8]===accountId;}).reduce(function(s,r){return s+(Number(r[4])||0);},0);
   const teacher=optionalDataRows_(APP.sheets.teacherPayments).filter(function(r){return r[8]===accountId;}).reduce(function(s,r){return s+(Number(r[4])||0);},0);
   const borrowed=optionalDataRows_(APP.sheets.loans).filter(function(r){return r[7]===accountId;}).reduce(function(s,r){return s+(Number(r[3])||0);},0);
@@ -2137,7 +2262,7 @@ function assertCashDeltas_(deltas, operation) {
 function pledgeCollectionCashDeltas_(pledgeId, direction) {
   const deltas = {};
   dataRows_(APP.sheets.collections).forEach(function(r) {
-    if (r[2] === pledgeId && r[12]) deltas[r[12]] = (deltas[r[12]] || 0) + (Number(direction) || 0) * (Number(r[7]) || 0);
+    if (r[2] === pledgeId && r[12] && isCollectionApprovedRow_(r)) deltas[r[12]] = (deltas[r[12]] || 0) + (Number(direction) || 0) * (Number(r[7]) || 0);
   });
   return deltas;
 }
@@ -2163,7 +2288,7 @@ function recalculatePledge_(pledgeId) {
   const ss = getDb_();
   const pledge = findRowBy_(APP.sheets.pledges, 1, pledgeId);
   if (!pledge) return;
-  const paid = dataRows_(APP.sheets.collections).filter(r => r[2] === pledgeId).reduce((s,r) => s + (Number(r[7]) || 0), 0);
+  const paid = dataRows_(APP.sheets.collections).filter(r => r[2] === pledgeId && isCollectionApprovedRow_(r)).reduce((s,r) => s + (Number(r[7]) || 0), 0);
   const total = Number(pledge.values[7]) || 0;
   const remaining = Math.max(0, total - paid);
   const status = remaining <= 0 ? 'Kapandı' : (paid > 0 ? 'Kısmi' : 'Ödenmedi');
@@ -2410,6 +2535,7 @@ function requireSession_(token) {
   return session;
 }
 function requireAdmin_(token) { const s=requireSession_(token); if(s.role!=='YÖNETİCİ') throw new Error('Bu işlem için yönetici yetkisi gerekir.'); return s; }
+function requireApprover_(token) { const s=requireSession_(token); if(!isApproverSession_(s)) throw new Error('Bu işlem için yönetici veya muhasebe sorumlusu yetkisi gerekir.'); return s; }
 function withLock_(fn) { const lock=LockService.getScriptLock(); lock.waitLock(20000); try{return fn();}finally{lock.releaseLock();} }
 function audit_(email, action, type, id, detail) {
   try { appendRows_(getDb_().getSheetByName(APP.sheets.audit), [[new Date(),email,action,type,id,detail]], HEADERS.audit.length); } catch(e) {}
