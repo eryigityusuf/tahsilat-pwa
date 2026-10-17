@@ -182,6 +182,30 @@ function upgradeSystem() {
   return 'Sistem güncellendi.';
 }
 
+/** Mevcut tahsilatların gününü koruyarak tarihlerini Ekim 2026'ya taşır. */
+function moveExistingCollectionsToOctober2026() {
+  resetRequestCache_();
+  const sh = getDb_().getSheetByName(APP.sheets.collections);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return { updated:0, skipped:0, period:'2026-10' };
+  const range = sh.getRange(2, 2, lastRow - 1, 1);
+  const values = range.getValues();
+  let updated = 0;
+  let skipped = 0;
+  const mapped = values.map(function(row) {
+    const source = row[0] instanceof Date ? row[0] : new Date(row[0]);
+    if (isNaN(source.getTime())) {
+      skipped++;
+      return [row[0]];
+    }
+    updated++;
+    return [new Date(2026, 9, source.getDate(), 12, 0, 0, 0)];
+  });
+  range.setValues(mapped);
+  audit_('SİSTEM', 'TOPLU_TARİH_GÜNCELLENDİ', 'Tahsilatlar', '2026-10', updated + ' tahsilat Ekim 2026 dönemine taşındı; ' + skipped + ' kayıt atlandı.');
+  return { updated:updated, skipped:skipped, period:'2026-10' };
+}
+
 /**
  * Mevcut listenizi topluca aktarır. Kaynak başlıklar:
  * YIL, BAĞIŞ TÜRÜ, ADI SOYADI, TELEFONU, ÖDEYEN, REFERANS, MİKTARI, ÖDENEN, KALAN.
