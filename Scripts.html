@@ -457,7 +457,7 @@ function editStudentAccrualModal(id){
 async function submitStudentAccrualEdit(id){await submit('updateStudentAccrual',{id:id,studentName:$('#fStudentName').value,payer:$('#fPayer').value,phone:$('#fPhone').value,feeType:$('#fStudentType').value,amount:$('#fAmount').value,accrualDate:$('#fDate').value})}
 async function removeStudentAccrual(id){if(!confirm('Bu öğrenci tahakkuku ve bağlı tüm tahsilatlar kalıcı olarak silinsin mi?'))return;setBusy(true);try{const r=await server('deletePledge',state.token,id);toast(`Öğrenci tahakkuku silindi. ${r.deletedCollections} bağlı tahsilat kaldırıldı.`);scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}}
 function downloadPledgeTemplate(){
-  const headers=['SENE','NEVİ','HESAP','ÖDEYEN','NUMARA','REFERANS','PERSONEL','BAKİYE','ÖDENEN','KALAN'];
+  const headers=['Yıl','Faaliyet','Alt Faaliyet','Hesap Kodu','Hesap Adı','Kimin Adına','İletişim Tel','Referans','Nevi','Grubu','Tahakkuk (TL)','Ödenen (TL)','Kalan (TL)','Notlar'];
   const csv='\uFEFF'+headers.join(';')+'\r\n';
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
   const url=URL.createObjectURL(blob);
@@ -467,7 +467,7 @@ function downloadPledgeTemplate(){
   toast('Taahhüt şablonu indirildi.');
 }
 function bulkPledgeModal(){
-  const fields=`<label class="wide">Doldurulmuş CSV şablonu<input id="fBulkFile" type="file" accept=".csv,text/csv" required></label><div class="wide upload-note"><strong>Başlıkları değiştirmeyin.</strong><span>BAKİYE toplam taahhüttür. ÖDENEN boşsa 0 kabul edilir. KALAN, BAKİYE − ÖDENEN olmalıdır. Dosyayı CSV UTF-8 olarak kaydedin.</span></div>`;
+  const fields=`<label class="wide">Muhasebe sisteminden alınan CSV dosyası<input id="fBulkFile" type="file" accept=".csv,.txt,text/csv,text/plain" required></label><div class="wide upload-note"><strong>14 sütun başlığını değiştirmeyin.</strong><span>TAHAKKUK (TL) toplam taahhüttür. ÖDENEN (TL) boşsa 0 kabul edilir. KALAN (TL), TAHAKKUK (TL) − ÖDENEN (TL) olmalıdır.</span><span>Dosyayı Excel'de CSV UTF-8 biçiminde kaydedin. Faaliyet, Alt Faaliyet, Hesap Kodu, Grubu ve Notlar bilgileri ayrıca saklanır.</span></div>`;
   showModal('Toplu taahhüt ekle',formHtml(fields,'submitBulkPledges()'));
 }
 function personnelPdfModal(){
@@ -531,11 +531,11 @@ async function submitBulkPledges(){
     const matrix=parseDelimited(await file.text());
     if(matrix.length<2)throw new Error('Dosyada başlık dışında kayıt bulunamadı.');
     const headers=matrix[0].map(normalizeUploadHeader);
-    const required=['SENE','NEVI','HESAP','ODEYEN','NUMARA','REFERANS','PERSONEL','BAKIYE','ODENEN','KALAN'];
+    const required=['YIL','FAALIYET','ALT FAALIYET','HESAP KODU','HESAP ADI','KIMIN ADINA','ILETISIM TEL','REFERANS','NEVI','GRUBU','TAHAKKUK (TL)','ODENEN (TL)','KALAN (TL)','NOTLAR'];
     const missing=required.filter(h=>!headers.includes(h));
     if(missing.length)throw new Error('Eksik veya değiştirilmiş başlıklar: '+missing.join(', '));
     const col={};headers.forEach((h,i)=>col[h]=i);
-    const rows=matrix.slice(1).filter(r=>r.some(v=>String(v||'').trim()!=='')).map(r=>({year:r[col.SENE]||'',type:r[col.NEVI]||'',account:r[col.HESAP]||'',payer:r[col.ODEYEN]||'',phone:r[col.NUMARA]||'',reference:r[col.REFERANS]||'',personnel:r[col.PERSONEL]||'',balance:r[col.BAKIYE]||'',paid:r[col.ODENEN]||'',remaining:r[col.KALAN]||''}));
+    const rows=matrix.slice(1).filter(r=>r.some(v=>String(v||'').trim()!=='')).map(r=>({year:r[col.YIL]||'',activity:r[col.FAALIYET]||'',subActivity:r[col['ALT FAALIYET']]||'',accountCode:r[col['HESAP KODU']]||'',account:r[col['HESAP ADI']]||'',payer:r[col['KIMIN ADINA']]||'',phone:r[col['ILETISIM TEL']]||'',reference:r[col.REFERANS]||'',type:r[col.NEVI]||'',group:r[col.GRUBU]||'',personnel:'',balance:r[col['TAHAKKUK (TL)']]||'',paid:r[col['ODENEN (TL)']]||'',remaining:r[col['KALAN (TL)']]||'',notes:r[col.NOTLAR]||''}));
     if(!rows.length)throw new Error('Dosyada aktarılacak kayıt bulunamadı.');
     const result=await server('bulkSavePledges',state.token,{rows:rows});
     $('#modal').close();toast(`${result.imported} taahhüt ve ${result.openingCollections} açılış tahsilatı eklendi.`);scheduleDataSync();

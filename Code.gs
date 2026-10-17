@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 6,
+  cacheSchemaVersion: 7,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -28,7 +28,7 @@ const APP = Object.freeze({
 const HEADERS = Object.freeze({
   users: ['Kullanıcı ID','Ad Soyad','E-posta','Rol','Referans Adı','PIN Salt','PIN Özeti','Aktif','Oluşturma Tarihi'],
   types: ['Bağış Türü','Aktif'],
-  pledges: ['Taahhüt ID','Yıl','Bağış Türü','Ad Soyad','Telefon','Ödeyen','Referans','Taahhüt Tutarı','Ödenen','Kalan','Durum','Taahhüt Tarihi','Oluşturan','Oluşturma Zamanı','Personel','Alacak Durumu','Kayıt Kaynağı'],
+  pledges: ['Taahhüt ID','Yıl','Bağış Türü','Ad Soyad','Telefon','Ödeyen','Referans','Taahhüt Tutarı','Ödenen','Kalan','Durum','Taahhüt Tarihi','Oluşturan','Oluşturma Zamanı','Personel','Alacak Durumu','Kayıt Kaynağı','Faaliyet','Alt Faaliyet','Hesap Kodu','Grubu','Notlar'],
   collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni'],
   referenceTargets: ['Hedef ID','Başlangıç','Bitiş','Referans','Temin Hedefi','Tahsilat Hedefi','Aktif','Açıklama','Oluşturma Zamanı'],
   cashAccounts: ['Hesap ID','Hesap Adı','Hesap Türü','Açılış Bakiyesi','Aktif','Açıklama','Oluşturma Zamanı'],
@@ -222,7 +222,7 @@ function importExistingPledges(sourceSpreadsheetId, sourceSheetName) {
       col['TELEFONU'] == null ? '' : cleanText_(r[col['TELEFONU']], 30), payer, reference,
       amount, paid, remaining, remaining <= 0 ? 'Kapandı' : (paid > 0 ? 'Kısmi' : 'Ödenmedi'),
       pledgeDate, 'TOPLU_AKTARIM', new Date(),
-      col['PERSONEL'] == null ? '' : cleanText_(r[col['PERSONEL']], 120), 'AKTİF', 'BAĞIŞ'
+      col['PERSONEL'] == null ? '' : cleanText_(r[col['PERSONEL']], 120), 'AKTİF', 'BAĞIŞ', '', '', '', '', ''
     ]);
     if (paid > 0) collectionRows.push([
       makeId_('THS'), pledgeDate, id, fullName, type, reference, payer, paid,
@@ -531,7 +531,7 @@ function saveStudentAccrual(token, payload) {
     appendRows_(getDb_().getSheetByName(APP.sheets.pledges), [[
       id, date.getFullYear(), feeType, studentName, cleanText_(payload.phone, 30),
       cleanText_(payload.payer, 120), '', amount, 0, amount, 'Ödenmedi', date,
-      session.email, new Date(), '', 'AKTİF', 'ÖĞRENCİ'
+      session.email, new Date(), '', 'AKTİF', 'ÖĞRENCİ', '', '', '', '', ''
     ]], HEADERS.pledges.length);
     audit_(session.email, 'EKLENDİ', 'Öğrenci Tahakkuku', id, studentName + ' / ' + amount + ' TL');
   });
@@ -591,20 +591,25 @@ function bulkSavePledges(token, payload) {
       const phone = cleanText_(item.phone, 30);
       const reference = cleanText_(item.reference, 100);
       const personnel = cleanText_(item.personnel, 120);
+      const activity = cleanText_(item.activity, 120);
+      const subActivity = cleanText_(item.subActivity, 120);
+      const accountCode = cleanText_(item.accountCode, 80);
+      const group = cleanText_(item.group, 120);
+      const notes = cleanText_(item.notes, 500);
       const balance = flexibleNumber_(item.balance);
       const paid = item.paid === '' || item.paid == null ? 0 : flexibleNumber_(item.paid);
       const suppliedRemaining = item.remaining === '' || item.remaining == null ? null : flexibleNumber_(item.remaining);
 
-      if (!isFinite(year) || year < 1900 || year > 2100) throw new Error('SENE geçersiz');
+      if (!isFinite(year) || year < 1900 || year > 2100) throw new Error('YIL geçersiz');
       if (!type) throw new Error('NEVİ boş olamaz');
-      if (!account) throw new Error('HESAP boş olamaz');
+      if (!account) throw new Error('HESAP ADI boş olamaz');
       if (!reference) throw new Error('REFERANS boş olamaz');
-      if (!isFinite(balance) || balance <= 0) throw new Error('BAKİYE sıfırdan büyük olmalıdır');
-      if (!isFinite(paid) || paid < 0) throw new Error('ÖDENEN geçersiz');
-      if (paid > balance) throw new Error('ÖDENEN, BAKİYE tutarından büyük olamaz');
+      if (!isFinite(balance) || balance <= 0) throw new Error('TAHAKKUK (TL) sıfırdan büyük olmalıdır');
+      if (!isFinite(paid) || paid < 0) throw new Error('ÖDENEN (TL) geçersiz');
+      if (paid > balance) throw new Error('ÖDENEN (TL), TAHAKKUK (TL) tutarından büyük olamaz');
       const remaining = Math.round((balance - paid) * 100) / 100;
       if (suppliedRemaining != null && (!isFinite(suppliedRemaining) || Math.abs(suppliedRemaining - remaining) > 0.01)) {
-        throw new Error('KALAN, BAKİYE - ÖDENEN ile uyuşmuyor');
+        throw new Error('KALAN (TL), TAHAKKUK (TL) - ÖDENEN (TL) ile uyuşmuyor');
       }
 
       const id = makeId_('TAA');
@@ -612,7 +617,7 @@ function bulkSavePledges(token, payload) {
       pledgeRows.push([
         id, year, type, account, phone, payer, reference, balance, paid, remaining,
         remaining <= 0 ? 'Kapandı' : (paid > 0 ? 'Kısmi' : 'Ödenmedi'),
-        pledgeDate, session.email, new Date(), personnel, 'AKTİF', 'BAĞIŞ'
+        pledgeDate, session.email, new Date(), personnel, 'AKTİF', 'BAĞIŞ', activity, subActivity, accountCode, group, notes
       ]);
       if (paid > 0) collectionRows.push([
         makeId_('THS'), pledgeDate, id, account, type, reference, payer, paid,
@@ -2168,7 +2173,7 @@ function expenseRemainingItems_(commitments) {
   }).sort(function(a, b) { return b.remaining - a.remaining; });
 }
 
-function pledgeDto_(r) { return { id:r[0], year:r[1], donationType:r[2], fullName:r[3], phone:r[4], payer:r[5], reference:r[6], amount:n_(r[7]), paid:n_(r[8]), remaining:n_(r[9]), status:r[10], pledgeDate:isoDate_(r[11]), personnel:r[14]||'', receivableStatus:String(r[15]||'AKTİF').toUpperCase(), source:String(r[16]||'BAĞIŞ').toUpperCase() }; }
+function pledgeDto_(r) { return { id:r[0], year:r[1], donationType:r[2], fullName:r[3], phone:r[4], payer:r[5], reference:r[6], amount:n_(r[7]), paid:n_(r[8]), remaining:n_(r[9]), status:r[10], pledgeDate:isoDate_(r[11]), personnel:r[14]||'', receivableStatus:String(r[15]||'AKTİF').toUpperCase(), source:String(r[16]||'BAĞIŞ').toUpperCase(), activity:r[17]||'', subActivity:r[18]||'', accountCode:r[19]||'', group:r[20]||'', notes:r[21]||'' }; }
 function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:r[3], donationType:r[4], reference:r[5], payer:r[6], amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'' }; }
 function expenseCommitmentDto_(r, kind) { return { id:r[0], name:r[1], paymentType:r[2], period:r[3], total:n_(r[4]), paid:n_(r[5]), remaining:n_(r[6]), dueDate:isoDate_(r[7]), status:r[8], note:r[9], lessonHours:kind==='teacher'?n_(r[11]):0, hourlyRate:kind==='teacher'?n_(r[12]):0 }; }
 function expensePaymentDto_(r, commitment) { return { id:r[0], date:isoDate_(r[1]), commitmentId:r[2], name:r[3], amount:n_(r[4]), method:r[5], note:r[6], accountId:r[8]||'', accountName:r[9]||'', accrualPeriod:commitment?String(commitment[3]||''):'', paymentType:commitment?String(commitment[2]||''):'' }; }
