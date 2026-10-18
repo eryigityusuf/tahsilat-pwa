@@ -491,18 +491,22 @@ function savePledge(token, payload) {
   const session = requireSession_(token);
   payload = payload || {};
   const amount = positiveNumber_(payload.amount, 'Taahhüt tutarı');
-  const date = parseDate_(payload.pledgeDate, 'Taahhüt tarihi');
+  const year = Math.trunc(Number(payload.year));
   const donationType = cleanText_(payload.donationType, 80);
   const fullName = cleanText_(payload.fullName, 120);
   const reference = isApproverSession_(session) ? cleanText_(payload.reference, 100) : session.reference;
-  if (!donationType || !fullName || !reference) throw new Error('Bağış türü, ad soyad ve referans zorunludur.');
+  if (!isFinite(year) || year < 1900 || year > 2100) throw new Error('Yıl geçersiz.');
+  if (!donationType || !fullName || !reference) throw new Error('Nevi, hesap adı ve referans zorunludur.');
+  const date = new Date(year, 0, 1, 12, 0, 0, 0);
   const id = makeId_('TAA');
   withLock_(function() {
-    getDb_().getSheetByName(APP.sheets.pledges).appendRow([
-      id, date.getFullYear(), donationType, fullName,
+    appendRows_(getDb_().getSheetByName(APP.sheets.pledges), [[
+      id, year, donationType, fullName,
       cleanText_(payload.phone, 30), cleanText_(payload.payer, 120), reference, amount,
-      0, amount, 'Ödenmedi', date, session.email, new Date(), cleanText_(payload.personnel, 120), 'AKTİF', 'BAĞIŞ'
-    ]);
+      0, amount, 'Ödenmedi', date, session.email, new Date(), cleanText_(payload.personnel, 120), 'AKTİF', 'BAĞIŞ',
+      cleanText_(payload.activity, 120), cleanText_(payload.subActivity, 120), cleanText_(payload.accountCode, 80),
+      cleanText_(payload.group, 80), cleanText_(payload.notes, 500)
+    ]], HEADERS.pledges.length);
     audit_(session.email, 'EKLENDİ', 'Taahhüt', id, amount + ' TL');
   });
   return {ok:true};
@@ -513,11 +517,13 @@ function updatePledge(token, payload) {
   payload = payload || {};
   const id = cleanText_(payload.id, 60);
   const amount = positiveNumber_(payload.amount, 'Taahhüt tutarı');
-  const date = parseDate_(payload.pledgeDate, 'Taahhüt tarihi');
+  const year = Math.trunc(Number(payload.year));
   const donationType = cleanText_(payload.donationType, 80);
   const fullName = cleanText_(payload.fullName, 120);
   const reference = cleanText_(payload.reference, 100);
-  if (!donationType || !fullName || !reference) throw new Error('Bağış türü, ad soyad ve referans zorunludur.');
+  if (!isFinite(year) || year < 1900 || year > 2100) throw new Error('Yıl geçersiz.');
+  if (!donationType || !fullName || !reference) throw new Error('Nevi, hesap adı ve referans zorunludur.');
+  const date = new Date(year, 0, 1, 12, 0, 0, 0);
   withLock_(function() {
     const current = findRowBy_(APP.sheets.pledges, 1, id);
     if (!current) throw new Error('Taahhüt bulunamadı.');
@@ -528,11 +534,14 @@ function updatePledge(token, payload) {
     const status = remaining <= 0 ? 'Kapandı' : (paid > 0 ? 'Kısmi' : 'Ödenmedi');
     const sh = getDb_().getSheetByName(APP.sheets.pledges);
     sh.getRange(current.row, 2, 1, 10).setValues([[
-      date.getFullYear(), donationType, fullName, cleanText_(payload.phone, 30), cleanText_(payload.payer, 120), reference,
+      year, donationType, fullName, cleanText_(payload.phone, 30), cleanText_(payload.payer, 120), reference,
       amount, paid, remaining, status
     ]]);
     sh.getRange(current.row, 12).setValue(date);
-    sh.getRange(current.row, 15).setValue(cleanText_(payload.personnel, 120));
+    sh.getRange(current.row, 18, 1, 5).setValues([[
+      cleanText_(payload.activity, 120), cleanText_(payload.subActivity, 120), cleanText_(payload.accountCode, 80),
+      cleanText_(payload.group, 80), cleanText_(payload.notes, 500)
+    ]]);
     const collectionSheet = getDb_().getSheetByName(APP.sheets.collections);
     dataRows_(APP.sheets.collections).forEach(function(r, index) {
       if (r[2] === id) collectionSheet.getRange(index + 2, 4, 1, 4).setValues([[fullName, donationType, reference, cleanText_(payload.payer, 120)]]);
