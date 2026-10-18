@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 7,
+  cacheSchemaVersion: 8,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -2095,7 +2095,10 @@ function buildAppData_(session, filters) {
       periodCollected: sum_(periodCollections, 7),
       pledgeCount: pledgeRows.length
     },
-    pledges: (applyToLists?accessiblePledgeRows.filter(function(r){return inRange_(r[11],start,end);}):accessiblePledgeRows).slice().reverse().map(pledgeDto_),
+    // Taahhüt listesi kendi yıl ve sütun filtrelerini kullanır. Üst tarih aralığı yalnızca
+    // dönemsel tahsilat/analizleri süzer; aksi halde Ekim tahsilatları görünürken yıl başı
+    // tarihli taahhütler yanlışlıkla listeden kayboluyordu.
+    pledges: accessiblePledgeRows.slice().reverse().map(pledgeDto_),
     collections: (applyToLists?allCollectionRows.filter(function(r){return inRange_(r[1],start,end);}):allCollectionRows).slice().reverse().map(collectionDto_),
     donationAnalysis: groupDonations_(pledgeRows, collectionRows, periodCollections),
     referenceAnalysis: groupReferences_(referencePledgeRows, referenceCollectionRows, referencePeriodCollections, referencePeriodPledges),
