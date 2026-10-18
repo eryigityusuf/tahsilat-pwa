@@ -182,6 +182,34 @@ function upgradeSystem() {
   return 'Sistem güncellendi.';
 }
 
+/** Faaliyeti Veli Teberrusu olan mevcut taahhütlerin alt faaliyetini aynı ada getirir. */
+function setVeliTeberrusuSubActivities() {
+  resetRequestCache_();
+  const sh = getDb_().getSheetByName(APP.sheets.pledges);
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return { updated:0, matched:0 };
+
+  const range = sh.getRange(2, 18, lastRow - 1, 2);
+  const values = range.getValues();
+  const targetKey = normalizeKey_('Veli Teberrusu');
+  let matched = 0;
+  let updated = 0;
+
+  values.forEach(function(row) {
+    if (normalizeKey_(row[0]) !== targetKey) return;
+    matched++;
+    if (cleanText_(row[1], 120) === 'Veli Teberrusu') return;
+    row[1] = 'Veli Teberrusu';
+    updated++;
+  });
+
+  if (updated) range.setValues(values);
+  invalidateAppDataCache_();
+  audit_(Session.getEffectiveUser().getEmail() || 'SİSTEM', 'TOPLU_GÜNCELLENDİ', 'Taahhütler', '', updated + ' Veli Teberrusu alt faaliyeti güncellendi');
+  Logger.log(JSON.stringify({ updated:updated, matched:matched }));
+  return { updated:updated, matched:matched };
+}
+
 /** Mevcut tahsilatların gününü koruyarak tarihlerini Ekim 2026'ya taşır. */
 function moveExistingCollectionsToOctober2026() {
   resetRequestCache_();
