@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 8,
+  cacheSchemaVersion: 9,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -2128,7 +2128,7 @@ function buildAppData_(session, filters) {
     // tarihli taahhütler yanlışlıkla listeden kayboluyordu.
     pledges: accessiblePledgeRows.slice().reverse().map(pledgeDto_),
     collections: (applyToLists?allCollectionRows.filter(function(r){return inRange_(r[1],start,end);}):allCollectionRows).slice().reverse().map(collectionDto_),
-    donationAnalysis: groupDonations_(pledgeRows, collectionRows, periodCollections),
+    donationAnalysis: groupSubActivities_(pledgeRows, collectionRows, periodCollections),
     referenceAnalysis: groupReferences_(referencePledgeRows, referenceCollectionRows, referencePeriodCollections, referencePeriodPledges),
     referenceTargets: referenceTargetData_(session, referencePledgeRows, referenceCollectionRows),
     cash: {
@@ -2181,12 +2181,25 @@ function studentData_(pledges, collections, periodCollections, start, end, apply
   };
 }
 
-function groupDonations_(pledges, collections, periodCollections) {
+function groupSubActivities_(pledges, collections, periodCollections) {
   const map = {};
-  dataRows_(APP.sheets.types).filter(r => r[1] === true).forEach(r => map[r[0]] = { name:r[0], pledged:0, collected:0, period:0 });
-  pledges.forEach(r => { const x = map[r[2]] || (map[r[2]]={name:r[2],pledged:0,collected:0,period:0}); x.pledged += Number(r[7]||0); });
-  collections.forEach(r => { const x = map[r[4]] || (map[r[4]]={name:r[4],pledged:0,collected:0,period:0}); x.collected += Number(r[7]||0); });
-  periodCollections.forEach(r => { const x = map[r[4]] || (map[r[4]]={name:r[4],pledged:0,collected:0,period:0}); x.period += Number(r[7]||0); });
+  const pledgeMap = {};
+  function nameForPledge_(row) { return cleanText_(row && row[18],120) || cleanText_(row && row[17],120) || cleanText_(row && row[2],120) || 'Belirtilmemiş'; }
+  function item_(name) {
+    name = cleanText_(name,120) || 'Belirtilmemiş';
+    const key = normalizeKey_(name) || 'belirtilmemis';
+    return map[key] || (map[key] = { name:name, pledged:0, collected:0, period:0 });
+  }
+  function collectionName_(row) {
+    const pledge = pledgeMap[String(row && row[2] || '')];
+    return pledge ? nameForPledge_(pledge) : (cleanText_(row && row[4],120) || 'Doğrudan Gelir');
+  }
+  (pledges || []).forEach(function(r) {
+    pledgeMap[String(r[0])] = r;
+    item_(nameForPledge_(r)).pledged += Number(r[7] || 0);
+  });
+  (collections || []).forEach(function(r) { item_(collectionName_(r)).collected += Number(r[7] || 0); });
+  (periodCollections || []).forEach(function(r) { item_(collectionName_(r)).period += Number(r[7] || 0); });
   return Object.keys(map).map(k => Object.assign(map[k], { remaining: map[k].pledged - map[k].collected }));
 }
 
