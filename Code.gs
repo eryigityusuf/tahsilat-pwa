@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 11,
+  cacheSchemaVersion: 12,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -20,6 +20,7 @@ const APP = Object.freeze({
     teacherPlans: 'Öğretmen Aylık Planları',
     teacherCommitments: 'Öğretmen Ödemeleri',
     teacherPayments: 'Öğretmen Ödeme Hareketleri',
+    studentPlans: 'Öğrenci Ödeme Planları',
     accountingImports: 'Muhasebe Aktarımları',
     userPreferences: 'Kullanıcı Tercihleri',
     audit: 'İşlem Günlüğü'
@@ -41,6 +42,7 @@ const HEADERS = Object.freeze({
   teacherPlans: ['Plan ID','Öğretmen','Ders Adı','Aylık Ders Saati','Saatlik Ücret','Aktif','Açıklama','Oluşturma Zamanı'],
   teacherCommitments: ['Ödeme ID','Öğretmen','Ders Adı','Dönem','Toplam Tutar','Ödenen','Kalan','Vade Tarihi','Durum','Açıklama','Oluşturma Zamanı','Ders Saati','Saatlik Ücret','Plan ID'],
   teacherPayments: ['Hareket ID','Tarih','Ödeme ID','Öğretmen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturma Zamanı','Hesap ID','Hesap Adı'],
+  studentPlans: ['Plan ID','Tahakkuk ID','Toplam Bedel','Peşinat','Taksit Sayısı','İlk Taksit Tarihi','Aylık Taksit','Oluşturma Zamanı','Güncelleme Zamanı'],
   accountingImports: ['Muhasebe Kayıt No','İşlem Türü','Sistem Kayıt No','Tarih','Tutar','Aktaran','Aktarım Zamanı'],
   userPreferences: ['Kullanıcı ID','Tercih Anahtarı','Değer','Güncelleme Zamanı'],
   audit: ['Zaman','Kullanıcı','İşlem','Kayıt Türü','Kayıt ID','Detay']
@@ -105,6 +107,7 @@ function setupSystem(adminName, adminEmail, adminPin) {
   createSheet_(ss, APP.sheets.teacherPlans, HEADERS.teacherPlans);
   createSheet_(ss, APP.sheets.teacherCommitments, HEADERS.teacherCommitments);
   createSheet_(ss, APP.sheets.teacherPayments, HEADERS.teacherPayments);
+  createSheet_(ss, APP.sheets.studentPlans, HEADERS.studentPlans);
   createSheet_(ss, APP.sheets.accountingImports, HEADERS.accountingImports);
   createSheet_(ss, APP.sheets.userPreferences, HEADERS.userPreferences);
   createSheet_(ss, APP.sheets.audit, HEADERS.audit);
@@ -133,6 +136,7 @@ function upgradeSystem() {
   if (!ss.getSheetByName(APP.sheets.staffPlans)) createSheet_(ss, APP.sheets.staffPlans, HEADERS.staffPlans);
   if (!ss.getSheetByName(APP.sheets.teacherPlans)) createSheet_(ss, APP.sheets.teacherPlans, HEADERS.teacherPlans);
   if (!ss.getSheetByName(APP.sheets.accountingImports)) createSheet_(ss, APP.sheets.accountingImports, HEADERS.accountingImports);
+  if (!ss.getSheetByName(APP.sheets.studentPlans)) createSheet_(ss, APP.sheets.studentPlans, HEADERS.studentPlans);
   if (!ss.getSheetByName(APP.sheets.userPreferences)) createSheet_(ss, APP.sheets.userPreferences, HEADERS.userPreferences);
   const commitments = ss.getSheetByName(APP.sheets.staffCommitments);
   if (commitments.getLastColumn() < HEADERS.staffCommitments.length) {
@@ -626,13 +630,16 @@ function saveStudentAccrual(token, payload) {
   const studentName = cleanText_(payload.studentName, 120);
   const feeType = cleanText_(payload.feeType, 80);
   if (!studentName || !feeType) throw new Error('Öğrenci adı ve ödeme türü zorunludur.');
+  const plan = studentPlanInput_(payload, amount, date);
   const id = makeId_('OGR');
   withLock_(function() {
-    appendRows_(getDb_().getSheetByName(APP.sheets.pledges), [[
+    const ss = getDb_();
+    appendRows_(ss.getSheetByName(APP.sheets.pledges), [[
       id, date.getFullYear(), feeType, studentName, cleanText_(payload.phone, 30),
       cleanText_(payload.payer, 120), '', amount, 0, amount, 'Ödenmedi', date,
       session.email, new Date(), '', 'AKTİF', 'ÖĞRENCİ', '', '', '', '', ''
     ]], HEADERS.pledges.length);
+    upsertStudentPlan_(ss, id, plan);
     audit_(session.email, 'EKLENDİ', 'Öğrenci Tahakkuku', id, studentName + ' / ' + amount + ' TL');
   });
   return {ok:true};
@@ -647,6 +654,7 @@ function updateStudentAccrual(token, payload) {
   const studentName = cleanText_(payload.studentName, 120);
   const feeType = cleanText_(payload.feeType, 80);
   if (!studentName || !feeType) throw new Error('Öğrenci adı ve ödeme türü zorunludur.');
+  const plan = studentPlanInput_(payload, amount, date);
   withLock_(function() {
     const current = findRowBy_(APP.sheets.pledges, 1, id);
     if (!current || !isStudentPledgeRow_(current.values)) throw new Error('Öğrenci tahakkuku bulunamadı.');
@@ -661,6 +669,7 @@ function updateStudentAccrual(token, payload) {
       amount, paid, remaining, status, date
     ]]);
     sh.getRange(current.row, 17).setValue('ÖĞRENCİ');
+    upsertStudentPlan_(getDb_(), id, plan);
     const collectionSheet = getDb_().getSheetByName(APP.sheets.collections);
     dataRows_(APP.sheets.collections).forEach(function(r, index) {
       if (r[2] === id) collectionSheet.getRange(index + 2, 4, 1, 4).setValues([[studentName, feeType, '', payer]]);
@@ -668,6 +677,40 @@ function updateStudentAccrual(token, payload) {
     audit_(session.email, 'DÜZELTİLDİ', 'Öğrenci Tahakkuku', id, studentName + ' / ' + amount + ' TL');
   });
   return {ok:true};
+}
+
+function studentPlanInput_(payload, total, accrualDate) {
+  const downPayment = nonNegativeNumber_(payload.downPayment, 'Peşinat');
+  if (downPayment > total) throw new Error('Peşinat toplam bedelden büyük olamaz.');
+  const firstInstallmentDate = parseDate_(payload.firstInstallmentDate, 'İlk taksit tarihi');
+  const installmentCount = 8;
+  const monthlyInstallment = Math.round(((total - downPayment) / installmentCount) * 100) / 100;
+  return {
+    total:total,
+    downPayment:downPayment,
+    installmentCount:installmentCount,
+    firstInstallmentDate:firstInstallmentDate,
+    monthlyInstallment:monthlyInstallment,
+    accrualDate:accrualDate
+  };
+}
+
+function upsertStudentPlan_(ss, pledgeId, plan) {
+  const sheet = ss.getSheetByName(APP.sheets.studentPlans);
+  if (!sheet) throw new Error('Öğrenci ödeme planı sayfası bulunamadı. Önce upgradeSystem işlevini çalıştırın.');
+  const existing = findRowBy_(APP.sheets.studentPlans, 2, pledgeId);
+  const now = new Date();
+  if (existing) {
+    sheet.getRange(existing.row, 3, 1, 7).setValues([[
+      plan.total, plan.downPayment, plan.installmentCount, plan.firstInstallmentDate,
+      plan.monthlyInstallment, existing.values[7] || now, now
+    ]]);
+    return;
+  }
+  appendRows_(sheet, [[
+    makeId_('OPL'), pledgeId, plan.total, plan.downPayment, plan.installmentCount,
+    plan.firstInstallmentDate, plan.monthlyInstallment, now, now
+  ]], HEADERS.studentPlans.length);
 }
 
 function convertPledgesToStudentAccruals(token, pledgeIds) {
@@ -1333,6 +1376,8 @@ function deletePledge(token, pledgeId) {
       }
     }
     ss.getSheetByName(APP.sheets.pledges).deleteRow(current.row);
+    const studentPlan = findRowBy_(APP.sheets.studentPlans, 2, id);
+    if (studentPlan) ss.getSheetByName(APP.sheets.studentPlans).deleteRow(studentPlan.row);
     audit_(session.email, 'SİLİNDİ', 'Taahhüt', id, current.values[3] + ' / ' + deletedCollections + ' tahsilat hareketi');
   });
   return { deletedCollections:deletedCollections };
@@ -1360,6 +1405,8 @@ function deleteAllPledges(token, confirmation) {
     backupUrl = backupPledgeData_(pledgeSheet, collectionSheet);
     if (pledgeCount) pledgeSheet.getRange(2, 1, pledgeCount, pledgeSheet.getLastColumn()).clearContent();
     if (collectionCount) collectionSheet.getRange(2, 1, collectionCount, collectionSheet.getLastColumn()).clearContent();
+    const studentPlanSheet = ss.getSheetByName(APP.sheets.studentPlans);
+    if (studentPlanSheet && studentPlanSheet.getLastRow() > 1) studentPlanSheet.getRange(2, 1, studentPlanSheet.getLastRow() - 1, studentPlanSheet.getLastColumn()).clearContent();
     audit_(session.email, 'TOPLU_SİLİNDİ', 'Taahhütler', '', pledgeCount + ' taahhüt / ' + collectionCount + ' tahsilat hareketi');
   });
   return { pledgeCount:pledgeCount, collectionCount:collectionCount, backupUrl:backupUrl };
@@ -2428,17 +2475,95 @@ function studentData_(pledges, collections, periodCollections, start, end, apply
   studentRows.forEach(function(r) { ids[String(r[0])] = true; });
   const payments = (collections || []).filter(function(r) { return ids[String(r[2])]; });
   const periodPayments = (periodCollections || []).filter(function(r) { return ids[String(r[2])]; });
+  const planMap = {};
+  optionalDataRows_(APP.sheets.studentPlans).forEach(function(r) { planMap[String(r[1])] = r; });
+  const paymentMap = {};
+  payments.forEach(function(r) {
+    const id = String(r[2]);
+    (paymentMap[id] || (paymentMap[id] = [])).push(r);
+  });
+  const enriched = studentRows.map(function(r) {
+    const dto = pledgeDto_(r);
+    dto.paymentPlan = studentPaymentPlanDto_(r, planMap[String(r[0])], paymentMap[String(r[0])] || []);
+    return dto;
+  });
+  const enrichedMap = {};
+  enriched.forEach(function(x) { enrichedMap[String(x.id)] = x; });
   const visibleAccruals = applyToLists ? studentRows.filter(function(r) { return inRange_(r[11], start, end); }) : studentRows;
   const visiblePayments = applyToLists ? payments.filter(function(r) { return inRange_(r[1], start, end); }) : payments;
+  const overdueItems = enriched.filter(function(x) { return x.paymentPlan && x.paymentPlan.overdueAmount > 0; });
   return {
     summary: {
       total: sum_(studentRows, 7),
       paid: sum_(payments, 7),
       remaining: sum_(studentRows, 9),
-      period: sum_(periodPayments, 7)
+      period: sum_(periodPayments, 7),
+      overdue: overdueItems.reduce(function(s, x) { return s + x.paymentPlan.overdueAmount; }, 0),
+      overdueCount: overdueItems.length
     },
-    accruals: visibleAccruals.slice().reverse().map(pledgeDto_),
+    accruals: visibleAccruals.slice().reverse().map(function(r) { return enrichedMap[String(r[0])]; }),
+    overdueItems: overdueItems.slice().sort(function(a, b) { return b.paymentPlan.overdueAmount - a.paymentPlan.overdueAmount; }),
     payments: visiblePayments.slice().reverse().map(collectionDto_)
+  };
+}
+
+function addMonthsClamped_(value, months) {
+  const source = value instanceof Date ? value : new Date(value);
+  const day = source.getDate();
+  const result = new Date(source.getFullYear(), source.getMonth() + months, 1, 12, 0, 0, 0);
+  const lastDay = new Date(result.getFullYear(), result.getMonth() + 1, 0).getDate();
+  result.setDate(Math.min(day, lastDay));
+  return result;
+}
+
+function studentPaymentPlanDto_(pledgeRow, planRow, paymentRows) {
+  const total = Number(pledgeRow[7]) || 0;
+  const paid = (paymentRows || []).reduce(function(s, r) { return s + (Number(r[7]) || 0); }, 0);
+  if (!planRow) return { configured:false, total:total, paid:paid, remaining:Math.max(0, total - paid), overdueAmount:0, schedule:[] };
+  const downPayment = Math.max(0, Number(planRow[3]) || 0);
+  const count = Math.max(1, Number(planRow[4]) || 8);
+  const firstDate = planRow[5] instanceof Date ? planRow[5] : new Date(planRow[5]);
+  const installmentTotal = Math.max(0, total - downPayment);
+  const baseInstallment = Math.round((Number(planRow[6]) || installmentTotal / count) * 100) / 100;
+  const accrualDate = pledgeRow[11] instanceof Date ? pledgeRow[11] : new Date(pledgeRow[11]);
+  const raw = [{ label:'Peşinat', dueDate:accrualDate, amount:downPayment }];
+  for (let i = 0; i < count; i++) {
+    const amount = i === count - 1 ? Math.max(0, Math.round((installmentTotal - baseInstallment * (count - 1)) * 100) / 100) : baseInstallment;
+    raw.push({ label:(i + 1) + '. Taksit', dueDate:addMonthsClamped_(firstDate, i), amount:amount });
+  }
+  let allocatable = paid;
+  const today = new Date(); today.setHours(23, 59, 59, 999);
+  const schedule = raw.map(function(item, index) {
+    const allocated = Math.min(item.amount, Math.max(0, allocatable));
+    allocatable = Math.max(0, allocatable - allocated);
+    const remaining = Math.max(0, Math.round((item.amount - allocated) * 100) / 100);
+    const overdue = remaining > 0 && item.dueDate <= today;
+    return {
+      order:index,
+      label:item.label,
+      dueDate:isoDate_(item.dueDate),
+      amount:item.amount,
+      paid:allocated,
+      remaining:remaining,
+      overdue:overdue,
+      status:remaining <= 0 ? 'Ödendi' : (allocated > 0 ? (overdue ? 'Gecikmiş / Kısmi' : 'Kısmi') : (overdue ? 'Gecikmiş' : 'Bekliyor'))
+    };
+  });
+  const overdueAmount = schedule.reduce(function(s, item) { return s + (item.overdue ? item.remaining : 0); }, 0);
+  const nextDue = schedule.find(function(item) { return item.remaining > 0; }) || null;
+  return {
+    configured:true,
+    total:total,
+    downPayment:downPayment,
+    installmentCount:count,
+    monthlyInstallment:baseInstallment,
+    firstInstallmentDate:isoDate_(firstDate),
+    paid:paid,
+    remaining:Math.max(0, Math.round((total - paid) * 100) / 100),
+    overdueAmount:Math.round(overdueAmount * 100) / 100,
+    nextDueDate:nextDue ? nextDue.dueDate : '',
+    status:paid >= total ? 'Tamamlandı' : (overdueAmount > 0 ? 'Gecikmiş' : 'Devam ediyor'),
+    schedule:schedule
   };
 }
 
