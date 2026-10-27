@@ -9,3 +9,13 @@ body{display:grid;grid-template-rows:auto minmax(0,1fr);background:#eef3f7}
 noscript{position:fixed;inset:auto 12px 12px;z-index:10;padding:12px;border-radius:10px;color:#fff;background:var(--red);text-align:center}
 @media(display-mode:standalone){.external-link{display:none}}
 @media(max-width:680px){.pwa-bar{padding-bottom:7px}.brand span,.connection{display:none}.brand strong{font-size:.82rem}.bar-actions{gap:5px}.install-button,.external-link{padding:7px 9px;font-size:.69rem}}
+/* Premium shell */
+:root{--navy:#102a43;--navy-deep:#071a2b;--teal:#26758a;--gold:#c9a55a;--line:#dce3e9;--shadow:0 16px 38px rgba(7,26,43,.16)}
+body{background:#f3f5f7}
+.pwa-bar{padding-top:max(9px,env(safe-area-inset-top));padding-bottom:9px;border-bottom:1px solid rgba(255,255,255,.08);background:linear-gradient(100deg,#071a2b,#102f49 68%,#174d5e);box-shadow:0 8px 28px rgba(7,26,43,.2)}
+.brand img{border:1px solid rgba(255,255,255,.18);border-radius:12px;box-shadow:0 7px 18px rgba(0,0,0,.25)}
+.brand strong{color:#fff;font-family:Georgia,"Times New Roman",serif;font-size:.98rem;letter-spacing:.01em}.brand span{color:#9fb6c5;letter-spacing:.04em;text-transform:uppercase}
+.connection{border:1px solid rgba(255,255,255,.1)}.connection.online{color:#d4ecdf;background:rgba(35,143,91,.2)}.connection.offline{color:#ffd4cf;background:rgba(180,56,56,.22)}
+.install-button,.external-link,.primary-button{border-radius:10px;transition:transform .15s,background .15s}.install-button:hover,.external-link:hover,.primary-button:hover{transform:translateY(-1px)}.install-button,.primary-button{background:linear-gradient(135deg,#31859a,#1c6579);box-shadow:0 7px 16px rgba(0,0,0,.16)}.external-link{border:1px solid rgba(201,165,90,.28);color:#ead59e;background:rgba(201,165,90,.1)}
+.message-card{background:radial-gradient(circle at 50% 20%,#fff 0,#f3f5f7 54%,#e8edf0 100%)}.message-card img{border-radius:24px;box-shadow:0 22px 48px rgba(7,26,43,.2)}.message-card h1{font-family:Georgia,"Times New Roman",serif;color:var(--navy);font-size:1.6rem}.spinner{border-color:#d8e0e5;border-right-color:var(--gold)}
+@media(max-width:680px){.pwa-bar{background:linear-gradient(105deg,#071a2b,#123b50)}}

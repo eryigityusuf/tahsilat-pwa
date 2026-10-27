@@ -486,11 +486,16 @@ function generateReferenceTargetsPdf(token, sortKey, periodKey) {
   try{
     const body=doc.getBody();
     body.setPageWidth(842).setPageHeight(595).setMarginTop(24).setMarginBottom(24).setMarginLeft(22).setMarginRight(22);
-    body.appendParagraph('REFERANS HEDEF PERFORMANS RAPORU').setAlignment(DocumentApp.HorizontalAlignment.CENTER).setBold(true).setFontSize(15).setForegroundColor('#163A5F');
-    body.appendParagraph('Rapor tarihi: '+Utilities.formatDate(new Date(),'Europe/Istanbul','dd.MM.yyyy HH:mm')).setAlignment(DocumentApp.HorizontalAlignment.CENTER).setFontSize(8);
+    body.appendParagraph('REFERANS HEDEF PERFORMANS RAPORU').setAlignment(DocumentApp.HorizontalAlignment.CENTER).setBold(true).setFontSize(15).setForegroundColor('#102A43');
+    body.appendParagraph((periodKey ? 'Hedef dönemi: '+periodKey+'  ·  ' : '')+'Rapor tarihi: '+Utilities.formatDate(new Date(),'Europe/Istanbul','dd.MM.yyyy HH:mm')).setAlignment(DocumentApp.HorizontalAlignment.CENTER).setFontSize(8).setForegroundColor('#657180');
+    const summary=items.reduce(function(s,x){s.pledgeTarget+=x.pledgeTarget;s.actualPledged+=x.actualPledged;s.collectionTarget+=x.collectionTarget;s.actualCollected+=x.actualCollected;return s;},{pledgeTarget:0,actualPledged:0,collectionTarget:0,actualCollected:0});
+    summary.totalTarget=summary.pledgeTarget+summary.collectionTarget;
+    summary.totalActual=summary.actualPledged+summary.actualCollected;
+    summary.totalRate=summary.totalTarget?summary.totalActual/summary.totalTarget:0;
+    appendReferenceTargetSummaryCards_(body,summary);
+    body.appendParagraph('').setFontSize(3);
     const rows=[['Referans','Dönem','Temin Hedefi','Temin','Temin %','Tahsilat Hedefi','Tahsilat','Temin + Tahsilat','Tahsilat %','Kalan Tahsilat','Hedef Durumu']];
     items.forEach(function(x){rows.push([x.reference,formatDateTr_(x.start)+' - '+formatDateTr_(x.end),moneyText_(x.pledgeTarget),moneyText_(x.actualPledged),percentText_(x.pledgeRate),moneyText_(x.collectionTarget),moneyText_(x.actualCollected),moneyText_(x.totalActual),percentText_(x.collectionRate),moneyText_(x.collectionRemaining),x.achievementStatus]);});
-    const summary=items.reduce(function(s,x){s.pledgeTarget+=x.pledgeTarget;s.actualPledged+=x.actualPledged;s.collectionTarget+=x.collectionTarget;s.actualCollected+=x.actualCollected;return s;},{pledgeTarget:0,actualPledged:0,collectionTarget:0,actualCollected:0});
     rows.push(['GENEL TOPLAM','',moneyText_(summary.pledgeTarget),moneyText_(summary.actualPledged),percentText_(summary.pledgeTarget?summary.actualPledged/summary.pledgeTarget:0),moneyText_(summary.collectionTarget),moneyText_(summary.actualCollected),moneyText_(summary.actualPledged+summary.actualCollected),percentText_(summary.collectionTarget?summary.actualCollected/summary.collectionTarget:0),moneyText_(Math.max(0,(summary.collectionTarget||0)-(summary.actualCollected||0))),'']);
     styleReportTable_(body.appendTable(rows));
     body.appendParagraph('Şüpheli alacaklar hedef gerçekleşmelerine dahil edilmemiştir.').setFontSize(8).setForegroundColor('#657180');
@@ -499,6 +504,34 @@ function generateReferenceTargetsPdf(token, sortKey, periodKey) {
     audit_(session.email,'PDF_OLUŞTURULDU','Referans Hedefleri','',items.length+' hedef');
     return {fileName:'referans-hedef-performans.pdf',mimeType:'application/pdf',base64:Utilities.base64Encode(pdf.getBytes())};
   }finally{try{DriveApp.getFileById(doc.getId()).setTrashed(true);}catch(e){}}
+}
+
+function appendReferenceTargetSummaryCards_(body,summary) {
+  const cards=[
+    ['TEMİN HEDEFİ',moneyText_(summary.pledgeTarget)],
+    ['GERÇEKLEŞEN TEMİN',moneyText_(summary.actualPledged)],
+    ['TAHSİLAT HEDEFİ',moneyText_(summary.collectionTarget)],
+    ['TOPLAM TAHSİLAT',moneyText_(summary.actualCollected)],
+    ['TOPLAM HEDEF',moneyText_(summary.totalTarget)],
+    ['TEMİN + TAHSİLAT',moneyText_(summary.totalActual)],
+    ['GENEL GERÇEKLEŞME',percentText_(summary.totalRate)]
+  ];
+  [[0,4],[4,7]].forEach(function(range,rowIndex){
+    const table=body.appendTable([cards.slice(range[0],range[1]).map(function(card){return card[0]+'\n'+card[1];})]);
+    table.setBorderColor(rowIndex===0?'#D7E0E8':'#C9A55A').setBorderWidth(1);
+    const row=table.getRow(0);
+    for(let c=0;c<row.getNumCells();c++){
+      const card=cards[range[0]+c];
+      const cell=row.getCell(c);
+      cell.setBackgroundColor(rowIndex===0?'#F3F6F8':'#FFF9EC').setPaddingTop(7).setPaddingBottom(7).setPaddingLeft(7).setPaddingRight(7);
+      const text=cell.editAsText();
+      const content=text.getText();
+      const valueStart=card[0].length+1;
+      text.setFontSize(0,card[0].length-1,7).setBold(0,card[0].length-1,true).setForegroundColor(0,card[0].length-1,'#657180');
+      if(content.length>valueStart) text.setFontSize(valueStart,content.length-1,11).setBold(valueStart,content.length-1,true).setForegroundColor(valueStart,content.length-1,rowIndex===0?'#102A43':'#8A692A');
+    }
+    if(rowIndex===0) body.appendParagraph('').setFontSize(2);
+  });
 }
 
 function styleReportTable_(table) {
