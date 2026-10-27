@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 10,
+  cacheSchemaVersion: 11,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -53,6 +53,7 @@ const STAFF_PAYMENT_TYPES = Object.freeze([
   'Sosyal Yardım'
 ]);
 const PLEDGE_COLUMN_KEYS = Object.freeze(['select','year','activity','subActivity','accountCode','fullName','payer','phone','reference','donationType','group','amount','paid','remaining','notes']);
+const COLLECTION_COLUMN_KEYS = Object.freeze(['year','activity','subActivity','accountCode','fullName','payer','phone','reference','donationType','group','accrual','paid','remaining','notes','date','id','method','accountName','approvalStatus','actions']);
 
 let REQUEST_DB_CACHE_ = null;
 let REQUEST_ROWS_CACHE_ = {};
@@ -2127,6 +2128,21 @@ function pledgeHiddenColumnsForUser_(userId) {
   }
 }
 
+function collectionHiddenColumnsForUser_(userId) {
+  const sh = userPreferencesSheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+  const rows = sh.getRange(2, 1, lastRow - 1, HEADERS.userPreferences.length).getValues();
+  const row = rows.find(function(r) { return String(r[0]) === String(userId) && String(r[1]) === 'collectionHiddenColumns'; });
+  if (!row) return [];
+  try {
+    const parsed = JSON.parse(String(row[2] || '[]'));
+    return Array.isArray(parsed) ? parsed.filter(function(key, index) { return COLLECTION_COLUMN_KEYS.indexOf(key) >= 0 && parsed.indexOf(key) === index; }) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
 function savePledgeColumnPreferences(token, hiddenColumns) {
   const session = requireSession_(token);
   const requested = Array.isArray(hiddenColumns) ? hiddenColumns : [];
@@ -2141,6 +2157,25 @@ function savePledgeColumnPreferences(token, hiddenColumns) {
     if (index >= 0) sh.getRange(index + 2, 3, 1, 2).setValues([[value, new Date()]]);
     else sh.appendRow([session.userId, 'pledgeHiddenColumns', value, new Date()]);
     audit_(session.email, 'TERCİH GÜNCELLENDİ', 'Kullanıcı', session.userId, 'Taahhüt görünür sütunları: ' + (PLEDGE_COLUMN_KEYS.length - hidden.length));
+  });
+  invalidateAppDataCache_();
+  return { hiddenColumns:hidden };
+}
+
+function saveCollectionColumnPreferences(token, hiddenColumns) {
+  const session = requireSession_(token);
+  const requested = Array.isArray(hiddenColumns) ? hiddenColumns : [];
+  const hidden = requested.filter(function(key, index) { return COLLECTION_COLUMN_KEYS.indexOf(key) >= 0 && requested.indexOf(key) === index; });
+  if (hidden.length >= COLLECTION_COLUMN_KEYS.length) throw new Error('En az bir sütun görünür kalmalıdır.');
+  withLock_(function() {
+    const sh = userPreferencesSheet_();
+    const lastRow = sh.getLastRow();
+    const rows = lastRow > 1 ? sh.getRange(2, 1, lastRow - 1, HEADERS.userPreferences.length).getValues() : [];
+    const index = rows.findIndex(function(r) { return String(r[0]) === String(session.userId) && String(r[1]) === 'collectionHiddenColumns'; });
+    const value = JSON.stringify(hidden);
+    if (index >= 0) sh.getRange(index + 2, 3, 1, 2).setValues([[value, new Date()]]);
+    else sh.appendRow([session.userId, 'collectionHiddenColumns', value, new Date()]);
+    audit_(session.email, 'TERCİH GÜNCELLENDİ', 'Kullanıcı', session.userId, 'Tahsilat görünür sütunları: ' + (COLLECTION_COLUMN_KEYS.length - hidden.length));
   });
   invalidateAppDataCache_();
   return { hiddenColumns:hidden };
@@ -2198,7 +2233,10 @@ function buildAppData_(session, filters) {
     filters: { start: isoDate_(start), end: isoDate_(end), applyToLists:applyToLists },
     donationTypes: dataRows_(APP.sheets.types).filter(r => r[1] === true).map(r => r[0]),
     methods: ['Nakit','Havale / EFT','Kredi Kartı','POS','Diğer'],
-    preferences: { pledgeHiddenColumns:pledgeHiddenColumnsForUser_(session.userId) },
+    preferences: {
+      pledgeHiddenColumns:pledgeHiddenColumnsForUser_(session.userId),
+      collectionHiddenColumns:collectionHiddenColumnsForUser_(session.userId)
+    },
     summary: {
       totalPledge: totalPledge,
       totalCollected: totalCollected,
