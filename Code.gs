@@ -670,6 +670,56 @@ function updateStudentAccrual(token, payload) {
   return {ok:true};
 }
 
+function convertPledgesToStudentAccruals(token, pledgeIds) {
+  const session = requireAdmin_(token);
+  const sourceIds = Array.isArray(pledgeIds) ? pledgeIds : [pledgeIds];
+  const ids = [];
+  const seen = {};
+  sourceIds.forEach(function(value) {
+    const id = cleanText_(value, 60);
+    if (id && !seen[id]) { seen[id] = true; ids.push(id); }
+  });
+  if (!ids.length) throw new Error('Öğrenci tahakkukuna aktarılacak en az bir taahhüt seçin.');
+  if (ids.length > 500) throw new Error('Tek işlemde en fazla 500 taahhüt aktarabilirsiniz.');
+
+  return withLock_(function() {
+    const rows = dataRows_(APP.sheets.pledges);
+    if (!rows.length) throw new Error('Aktarılabilecek taahhüt bulunamadı.');
+    const wanted = {};
+    ids.forEach(function(id) { wanted[id] = true; });
+    const collectionCounts = {};
+    dataRows_(APP.sheets.collections).forEach(function(row) {
+      const pledgeId = String(row[2] || '');
+      if (pledgeId) collectionCounts[pledgeId] = (collectionCounts[pledgeId] || 0) + 1;
+    });
+
+    let converted = 0;
+    let skipped = 0;
+    let linkedPayments = 0;
+    const found = {};
+    const sourceValues = rows.map(function(row) {
+      const id = String(row[0] || '');
+      let source = String(row[16] || '');
+      if (!wanted[id]) return [source];
+      found[id] = true;
+      if (isStudentPledgeRow_(row) || String(row[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') {
+        skipped++;
+        return [source];
+      }
+      source = 'ÖĞRENCİ';
+      converted++;
+      linkedPayments += collectionCounts[id] || 0;
+      return [source];
+    });
+    ids.forEach(function(id) { if (!found[id]) skipped++; });
+    if (!converted) throw new Error('Seçilen kayıtlar aktarılamadı. Öğrenci veya şüpheli alacak durumlarını kontrol edin.');
+
+    getDb_().getSheetByName(APP.sheets.pledges).getRange(2, 17, sourceValues.length, 1).setValues(sourceValues);
+    audit_(session.email, 'ÖĞRENCİYE AKTARILDI', 'Öğrenci Tahakkukları', '', converted + ' taahhüt / ' + linkedPayments + ' bağlı tahsilat / ' + skipped + ' atlandı');
+    return {ok:true, converted:converted, skipped:skipped, linkedPayments:linkedPayments};
+  });
+}
+
 function bulkSavePledges(token, payload) {
   const session = requireAdmin_(token);
   payload = payload || {};
