@@ -980,16 +980,6 @@ function bulkImportDonations(token, payload) {
       collectionSheet.getRange(1, start, 1, added.length).setValues([added]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#163A5F');
     }
 
-    const existing = {};
-    const collectionLast = collectionSheet.getLastRow();
-    if (collectionLast > 1) collectionSheet.getRange(2, 19, collectionLast - 1, 1).getValues().forEach(function(r) {
-      const key = normalizeKey_(r[0]); if (key) existing[key] = true;
-    });
-    const importLast = importSheet.getLastRow();
-    if (importLast > 1) importSheet.getRange(2, 1, importLast - 1, 1).getValues().forEach(function(r) {
-      const key = normalizeKey_(r[0]); if (key) existing[key] = true;
-    });
-
     const accounts = {};
     optionalDataRows_(APP.sheets.cashAccounts).forEach(function(r) {
       const item = { id:String(r[0]), name:String(r[1]), type:String(r[2] || ''), active:r[4] === true };
@@ -1003,9 +993,6 @@ function bulkImportDonations(token, payload) {
       try {
         item = item || {};
         const receiptNo = cleanText_(item.receiptNo, 100);
-        if (!receiptNo) throw new Error('MAKBUZ NO boş olamaz');
-        const receiptKey = normalizeKey_(receiptNo);
-        if (existing[receiptKey]) { result.skipped++; return; }
         const date = parseFlexibleDate_(item.date, 'Tarih');
         const name = cleanText_(item.name, 120);
         const reference = cleanText_(item.reference, 100) || 'YURT';
@@ -1024,11 +1011,10 @@ function bulkImportDonations(token, payload) {
         const systemId = makeId_('HBG');
         collectionAdds.push([
           systemId, date, '', name, paymentType, reference, name, amount, method,
-          'Toplu bağış aktarımı · Makbuz: ' + receiptNo, session.email, new Date(), account.id, account.name,
+          receiptNo ? 'Toplu teberru aktarımı · Makbuz: ' + receiptNo : 'Toplu teberru aktarımı', session.email, new Date(), account.id, account.name,
           'ONAYLANDI', session.email, new Date(), '', receiptNo, group, activity, phone
         ]);
-        historyAdds.push([receiptNo, 'HIZLI BAĞIŞ', systemId, date, amount, session.email, new Date()]);
-        existing[receiptKey] = true;
+        historyAdds.push([systemId, 'HIZLI BAĞIŞ', systemId, date, amount, session.email, new Date()]);
         result.imported++;
         result.total = Math.round((result.total + amount) * 100) / 100;
       } catch (e) {
@@ -1038,7 +1024,7 @@ function bulkImportDonations(token, payload) {
 
     appendRows_(collectionSheet, collectionAdds, HEADERS.collections.length);
     appendRows_(importSheet, historyAdds, HEADERS.accountingImports.length);
-    audit_(session.email, 'TOPLU_BAĞIŞ_AKTARIMI', 'Doğrudan Gelir', '', result.imported + ' bağış / ' + result.total + ' TL / ' + result.skipped + ' tekrar / ' + result.errors.length + ' hatalı');
+    audit_(session.email, 'TOPLU_TEBERRU_AKTARIMI', 'Doğrudan Gelir', '', result.imported + ' teberru / ' + result.total + ' TL / ' + result.errors.length + ' hatalı');
   });
   result.errors = result.errors.slice(0, 100);
   return result;
@@ -1410,6 +1396,45 @@ function deleteAllPledges(token, confirmation) {
     audit_(session.email, 'TOPLU_SİLİNDİ', 'Taahhütler', '', pledgeCount + ' taahhüt / ' + collectionCount + ' tahsilat hareketi');
   });
   return { pledgeCount:pledgeCount, collectionCount:collectionCount, backupUrl:backupUrl };
+}
+
+function deleteAllDonations(token, confirmation) {
+  const session = requireAdmin_(token);
+  if (String(confirmation || '').trim().toUpperCase() !== 'TEBERRULARI SİL') throw new Error('Toplu teberru silme onayı geçersiz.');
+  let donationCount = 0, total = 0, backupUrl = '';
+  withLock_(function() {
+    const ss = getDb_();
+    const collectionSheet = ss.getSheetByName(APP.sheets.collections);
+    const rows = dataRows_(APP.sheets.collections);
+    const donations = rows.filter(function(r) { return !String(r[2] || '').trim(); });
+    const remaining = rows.filter(function(r) { return String(r[2] || '').trim(); });
+    donationCount = donations.length;
+    if (!donationCount) return;
+    const deltas = {};
+    donations.forEach(function(r) {
+      total = Math.round((total + (Number(r[7]) || 0)) * 100) / 100;
+      if (r[12] && isCollectionApprovedRow_(r)) deltas[r[12]] = (deltas[r[12]] || 0) - (Number(r[7]) || 0);
+    });
+    assertCashDeltas_(deltas, 'Toplu teberru silme');
+    backupUrl = backupDonationData_(donations);
+    if (collectionSheet.getLastRow() > 1) collectionSheet.getRange(2, 1, collectionSheet.getLastRow() - 1, collectionSheet.getLastColumn()).clearContent();
+    appendRows_(collectionSheet, remaining, HEADERS.collections.length);
+    resetRequestCache_();
+    audit_(session.email, 'TOPLU_SİLİNDİ', 'Teberrular', '', donationCount + ' kayıt / ' + total + ' TL');
+  });
+  return { donationCount:donationCount, total:total, backupUrl:backupUrl };
+}
+
+function backupDonationData_(rows) {
+  const stamp = Utilities.formatDate(new Date(), 'Europe/Istanbul', 'yyyyMMdd-HHmmss');
+  const backup = SpreadsheetApp.create('Teberru Yedeği ' + stamp);
+  const sheet = backup.getSheets()[0];
+  sheet.setName('Teberrular');
+  const values = [HEADERS.collections].concat(rows || []);
+  sheet.getRange(1, 1, values.length, HEADERS.collections.length).setValues(values);
+  sheet.setFrozenRows(1);
+  sheet.getRange(1, 1, 1, HEADERS.collections.length).setFontWeight('bold').setFontColor('#ffffff').setBackground('#163A5F');
+  return backup.getUrl();
 }
 
 function backupPledgeData_(pledgeSheet, collectionSheet) {
