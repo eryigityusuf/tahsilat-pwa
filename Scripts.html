@@ -3,7 +3,7 @@ const state={token:'',data:null,view:'dashboard',pages:{},approvalTab:'all',pled
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='37';
+const PWA_BUILD='38';
 let deferredInstallPrompt=null;
 let backgroundOperationCount=0;
 let dataSyncRequested=0;
@@ -143,7 +143,7 @@ async function removeAllPledges(){
   setBusy(true);
   try{const r=await server('deleteAllPledges',state.token,approval);state.pledgeTab='active';alert(`${r.pledgeCount} taahhüt ve ${r.collectionCount} tahsilat hareketi silindi.\n\nSilmeden önce otomatik yedek oluşturuldu:\n${r.backupUrl}`);toast('Toplu silme tamamlandı ve Drive yedeği oluşturuldu.');scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
 }
-function collectionAccountingView(x){const p=(state.data.pledges||[]).find(y=>y.id===x.pledgeId)||{};return {year:p.year||String(x.date||'').slice(0,4),activity:p.activity||'',subActivity:p.subActivity||'',accountCode:p.accountCode||'',fullName:x.fullName||p.fullName||'',payer:x.payer||p.payer||'',phone:p.phone||'',reference:x.reference||p.reference||'',donationType:x.donationType||p.donationType||'',group:p.group||'',accrual:x.direct?0:Number(p.amount)||0,paid:Number(x.amount)||0,remaining:x.direct?0:Number(p.remaining)||0,notes:x.note||p.notes||''}}
+function collectionAccountingView(x){const p=(state.data.pledges||[]).find(y=>y.id===x.pledgeId)||{};return {year:p.year||String(x.date||'').slice(0,4),activity:x.activity||p.activity||'',subActivity:p.subActivity||'',accountCode:p.accountCode||'',fullName:x.fullName||p.fullName||'',payer:x.payer||p.payer||'',phone:x.phone||p.phone||'',reference:x.reference||p.reference||'',donationType:x.donationType||p.donationType||'',group:x.group||p.group||'',accrual:x.direct?0:Number(p.amount)||0,paid:Number(x.amount)||0,remaining:x.direct?0:Number(p.remaining)||0,notes:x.note||p.notes||''}}
 function collectionColumnDefinitions(){const approver=isApprover();return [
   {key:'year',label:'YIL',cell:(x,a)=>esc(a.year)},
   {key:'activity',label:'FAALİYET',cell:(x,a)=>esc(a.activity)},
@@ -160,6 +160,7 @@ function collectionColumnDefinitions(){const approver=isApprover();return [
   {key:'remaining',label:'KALAN (TL)',className:'money',cell:(x,a)=>money(a.remaining)},
   {key:'notes',label:'NOTLAR',cell:(x,a)=>esc(a.notes)},
   {key:'date',label:'TAHSİLAT TARİHİ',cell:x=>date(x.date)},
+  {key:'receiptNo',label:'MAKBUZ NO',cell:x=>esc(x.receiptNo||'')},
   {key:'id',label:'TAHSİLAT NO',cell:x=>esc(x.id)},
   {key:'method',label:'YÖNTEM',cell:x=>esc(x.method)},
   {key:'accountName',label:'KASA / BANKA',cell:x=>esc(x.accountName||'')},
@@ -169,7 +170,7 @@ function collectionColumnDefinitions(){const approver=isApprover();return [
 function collectionColumnsModal(){const hidden=new Set(state.collectionHiddenColumns||[]);const fields=`<div class="wide pledge-column-chooser"><p>Tabloda görmek istediğiniz tahsilat sütunlarını seçin. Seçiminiz kullanıcı hesabınızda saklanır ve giriş yaptığınız diğer cihazlarda da uygulanır.</p><div class="pledge-column-tools"><button class="btn tiny secondary" type="button" onclick="setAllCollectionColumnCheckboxes(true)">Tümünü göster</button><button class="btn tiny" type="button" onclick="setAllCollectionColumnCheckboxes(false)">Tümünü temizle</button></div><div class="pledge-column-grid">${collectionColumnDefinitions().map(c=>`<label class="pledge-column-item"><input type="checkbox" data-collection-column="${c.key}" ${hidden.has(c.key)?'':'checked'}><span>${esc(c.label)}</span></label>`).join('')}</div></div>`;showModal('Görünen tahsilat sütunları',formHtml(fields,'applyCollectionColumnVisibility()'))}
 function setAllCollectionColumnCheckboxes(checked){document.querySelectorAll('[data-collection-column]').forEach(x=>x.checked=checked)}
 async function applyCollectionColumnVisibility(){const boxes=[...document.querySelectorAll('[data-collection-column]')];const visible=boxes.filter(x=>x.checked).map(x=>x.dataset.collectionColumn);if(!visible.length){toast('En az bir sütun görünür kalmalıdır.',true);return}const previous=(state.collectionHiddenColumns||[]).slice();state.collectionHiddenColumns=collectionColumnDefinitions().map(x=>x.key).filter(key=>!visible.includes(key));$('#modal').close();renderCollections();try{await server('saveCollectionColumnPreferences',state.token,state.collectionHiddenColumns);toast('Tahsilat sütun görünümü kullanıcı hesabınıza kaydedildi.')}catch(e){state.collectionHiddenColumns=previous;renderCollections();toast(e.message,true)}}
-function renderCollections(){heading('Tahsilatlar','Muhasebe şablonuyla aynı alanlarda tahsilat ve hızlı bağış kayıtları');const records=[...state.data.collections].sort((a,b)=>b.amount-a.amount);const paged=pageData('collections',records);const columnDefs=collectionColumnDefinitions();const hiddenColumns=new Set(state.collectionHiddenColumns||[]);let visibleColumns=columnDefs.filter(c=>!hiddenColumns.has(c.key));if(!visibleColumns.length){state.collectionHiddenColumns=[];visibleColumns=columnDefs.slice()}const rows=paged.items.map(x=>{const a=collectionAccountingView(x);return `<tr>${visibleColumns.map(c=>`<td${c.className?` class="${c.className}"`:''}>${c.cell(x,a)}</td>`).join('')}</tr>`});const actions=`<div class="actions"><button class="btn secondary" onclick="collectionColumnsModal()">Sütunlar (${visibleColumns.length}/${columnDefs.length})</button><button class="btn secondary" onclick="quickDonationModal()">Hızlı bağış ekle</button><button class="btn secondary" onclick="bulkCollectionModal()">Toplu tahsilat</button><button class="btn primary" onclick="collectionModal()">Taahhütten tahsilat</button></div>`;$('#content').innerHTML=panel('Tahsilat ve hızlı bağış hareketleri',table(visibleColumns.map(c=>c.label),rows)+paged.controls,actions,'İlk 14 sütun toplu taahhüt şablonuyla aynıdır. Bekleyen ve reddedilen kayıtlar kasa, gelir ve taahhüt bakiyesini etkilemez.')}
+function renderCollections(){heading('Tahsilatlar','Muhasebe şablonuyla aynı alanlarda tahsilat ve hızlı bağış kayıtları');const records=[...state.data.collections].sort((a,b)=>b.amount-a.amount);const paged=pageData('collections',records);const columnDefs=collectionColumnDefinitions();const hiddenColumns=new Set(state.collectionHiddenColumns||[]);let visibleColumns=columnDefs.filter(c=>!hiddenColumns.has(c.key));if(!visibleColumns.length){state.collectionHiddenColumns=[];visibleColumns=columnDefs.slice()}const rows=paged.items.map(x=>{const a=collectionAccountingView(x);return `<tr>${visibleColumns.map(c=>`<td${c.className?` class="${c.className}"`:''}>${c.cell(x,a)}</td>`).join('')}</tr>`});const importActions=isApprover()?'<button class="btn secondary" onclick="downloadBulkDonationTemplate()">Bağış şablonu indir</button><button class="btn secondary" onclick="bulkDonationImportModal()">Toplu bağış aktar</button>':'';const actions=`<div class="actions"><button class="btn secondary" onclick="collectionColumnsModal()">Sütunlar (${visibleColumns.length}/${columnDefs.length})</button>${importActions}<button class="btn secondary" onclick="quickDonationModal()">Hızlı bağış ekle</button><button class="btn secondary" onclick="bulkCollectionModal()">Toplu tahsilat</button><button class="btn primary" onclick="collectionModal()">Taahhütten tahsilat</button></div>`;$('#content').innerHTML=panel('Tahsilat ve hızlı bağış hareketleri',table(visibleColumns.map(c=>c.label),rows)+paged.controls,actions,'Toplu bağış aktarımı doğrudan gelir oluşturur. Bekleyen ve reddedilen kayıtlar kasa, gelir ve taahhüt bakiyesini etkilemez.')}
 
 function renderApprovals(){
   heading('Onay Bekleyenler','Tüm tahsilatların onay durumları ve muhasebe işlemleri');
@@ -591,6 +592,29 @@ function downloadAccountingTemplate(){
   const headers=['MUHASEBE KAYIT NO','İŞLEM TÜRÜ','TARİH','BAĞLI KAYIT NO','ADI SOYADI / HESAP','BAĞIŞ / ÖDEME TÜRÜ','ÖDEYEN','REFERANS','DÖNEM','TUTAR','ÖDEME YÖNTEMİ','KASA / BANKA','AÇIKLAMA'];
   const csv='\uFEFF'+headers.join(';')+'\r\n';
   const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='muhasebe-hareket-aktarim-sablonu.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Excel uyumlu muhasebe şablonu indirildi.');
+}
+function downloadBulkDonationTemplate(){
+  const headers=['Tarih','Makbuz No','Kimin Adına','Referans','Grubu','Faaliyet','Telefon','Ödeme Tipi','Giriş Hesabı','Tahsilat (TL)'];
+  const csv='\uFEFF'+headers.join(';')+'\r\n';
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='toplu-bagis-aktarim-sablonu.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Toplu bağış şablonu indirildi.');
+}
+function bulkDonationImportModal(){
+  const accounts=((state.data.cash&&state.data.cash.accounts)||[]).filter(x=>x.active).map(x=>x.name).join(', ');
+  const fields=`<label class="wide">Muhasebeden alınan CSV dosyası<input id="fBulkDonationFile" type="file" accept=".csv,.txt,text/csv,text/plain" required></label><div class="wide upload-note"><strong>10 sütun başlığını değiştirmeyin.</strong><span>Referans alanı boş olan kayıtlar otomatik olarak YURT referansına aktarılır. Makbuz No daha önce aktarılmışsa kayıt tekrar eklenmez.</span><span>Ödeme Tipi bağış/gelir türü olarak kaydedilir. Giriş Hesabı sistemdeki aktif hesap adıyla aynı olmalıdır: ${esc(accounts||'Aktif hesap bulunamadı')}</span><span>Dosyayı Excel'de “CSV UTF-8” biçiminde kaydedin.</span></div>`;
+  showModal('Toplu bağış aktar',formHtml(fields,'submitBulkDonationImport()'));
+}
+async function submitBulkDonationImport(){
+  const file=$('#fBulkDonationFile').files[0];if(!file){toast('Doldurulmuş dosyayı seçin.',true);return}if(file.size>4*1024*1024){toast('Dosya 4 MB boyutundan büyük olamaz.',true);return}
+  setBusy(true);
+  try{
+    const matrix=parseDelimited(await file.text());if(matrix.length<2)throw new Error('Dosyada başlık dışında bağış bulunamadı.');
+    const headers=matrix[0].map(normalizeUploadHeader);const required=['TARIH','MAKBUZ NO','KIMIN ADINA','REFERANS','GRUBU','FAALIYET','TELEFON','ODEME TIPI','GIRIS HESABI','TAHSILAT (TL)'];const missing=required.filter(h=>!headers.includes(h));if(missing.length)throw new Error('Eksik veya değiştirilmiş başlıklar: '+missing.join(', '));
+    const col={};headers.forEach((h,i)=>col[h]=i);
+    const rows=matrix.slice(1).filter(r=>r.some(v=>String(v||'').trim()!=='')).map(r=>({date:r[col.TARIH]||'',receiptNo:r[col['MAKBUZ NO']]||'',name:r[col['KIMIN ADINA']]||'',reference:r[col.REFERANS]||'',group:r[col.GRUBU]||'',activity:r[col.FAALIYET]||'',phone:r[col.TELEFON]||'',paymentType:r[col['ODEME TIPI']]||'',account:r[col['GIRIS HESABI']]||'',amount:r[col['TAHSILAT (TL)']]||''}));
+    if(!rows.length)throw new Error('Dosyada aktarılacak bağış bulunamadı.');
+    const result=await server('bulkImportDonations',state.token,{rows:rows});scheduleDataSync();
+    const summary=`${result.imported} bağış aktarıldı · ${money(result.total)} · ${result.skipped} tekrar atlandı · ${result.errors.length} hatalı satır.`;if(result.errors.length)alert(summary+'\n\n'+result.errors.slice(0,20).join('\n'));else toast(summary);
+  }catch(e){alert(e.message);toast(e.message,true)}finally{setBusy(false)}
 }
 function accountingImportModal(){
   const fields=`<label class="wide">Doldurulmuş Excel CSV dosyası<input id="fAccountingFile" type="file" accept=".csv,.txt,text/csv,text/plain" required></label><div class="wide upload-note"><strong>Dosyayı Excel'de “CSV UTF-8” olarak kaydedin.</strong><span>TAHSİLAT için BAĞLI KAYIT NO alanına taahhüt numarası; personel/öğretmen ödemesi için tahakkuk numarası yazılması en güvenli eşleştirmedir.</span><span>Numara yoksa sistem ad, tür, referans veya dönemden tek bir açık kayıt bulmaya çalışır. KASA / BANKA değeri sistemdeki hesap adıyla aynı olmalıdır.</span></div>`;

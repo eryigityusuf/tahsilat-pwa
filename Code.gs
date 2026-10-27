@@ -30,7 +30,7 @@ const HEADERS = Object.freeze({
   users: ['Kullanıcı ID','Ad Soyad','E-posta','Rol','Referans Adı','PIN Salt','PIN Özeti','Aktif','Oluşturma Tarihi'],
   types: ['Bağış Türü','Aktif'],
   pledges: ['Taahhüt ID','Yıl','Bağış Türü','Ad Soyad','Telefon','Ödeyen','Referans','Taahhüt Tutarı','Ödenen','Kalan','Durum','Taahhüt Tarihi','Oluşturan','Oluşturma Zamanı','Personel','Alacak Durumu','Kayıt Kaynağı','Faaliyet','Alt Faaliyet','Hesap Kodu','Grubu','Notlar'],
-  collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni'],
+  collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni','Makbuz No','Grubu','Faaliyet','Telefon'],
   referenceTargets: ['Hedef ID','Başlangıç','Bitiş','Referans','Temin Hedefi','Tahsilat Hedefi','Aktif','Açıklama','Oluşturma Zamanı'],
   cashAccounts: ['Hesap ID','Hesap Adı','Hesap Türü','Açılış Bakiyesi','Aktif','Açıklama','Oluşturma Zamanı'],
   loans: ['Borç ID','Alım Tarihi','Borç Veren','Alınan Tutar','Geri Ödenen','Kalan Borç','Durum','Hesap ID','Hesap Adı','Açıklama','Oluşturma Zamanı'],
@@ -53,7 +53,7 @@ const STAFF_PAYMENT_TYPES = Object.freeze([
   'Sosyal Yardım'
 ]);
 const PLEDGE_COLUMN_KEYS = Object.freeze(['select','year','activity','subActivity','accountCode','fullName','payer','phone','reference','donationType','group','amount','paid','remaining','notes']);
-const COLLECTION_COLUMN_KEYS = Object.freeze(['year','activity','subActivity','accountCode','fullName','payer','phone','reference','donationType','group','accrual','paid','remaining','notes','date','id','method','accountName','approvalStatus','actions']);
+const COLLECTION_COLUMN_KEYS = Object.freeze(['year','activity','subActivity','accountCode','fullName','payer','phone','reference','donationType','group','accrual','paid','remaining','notes','date','receiptNo','id','method','accountName','approvalStatus','actions']);
 
 let REQUEST_DB_CACHE_ = null;
 let REQUEST_ROWS_CACHE_ = {};
@@ -296,7 +296,7 @@ function importExistingPledges(sourceSpreadsheetId, sourceSheetName) {
     }
     if (collectionRows.length) {
       const target = db.getSheetByName(APP.sheets.collections);
-      target.getRange(target.getLastRow() + 1, 1, collectionRows.length, HEADERS.collections.length).setValues(collectionRows);
+      target.getRange(target.getLastRow() + 1, 1, collectionRows.length, HEADERS.collections.length).setValues(fitRowsWidth_(collectionRows, HEADERS.collections.length));
     }
     audit_('TOPLU_AKTARIM', 'İÇE_AKTARILDI', 'Taahhüt', '', pledgeRows.length + ' kayıt');
   });
@@ -793,7 +793,7 @@ function bulkSavePledges(token, payload) {
     pledgeSheet.getRange(pledgeSheet.getLastRow() + 1, 1, pledgeRows.length, HEADERS.pledges.length).setValues(pledgeRows);
     if (collectionRows.length) {
       const collectionSheet = ss.getSheetByName(APP.sheets.collections);
-      collectionSheet.getRange(collectionSheet.getLastRow() + 1, 1, collectionRows.length, HEADERS.collections.length).setValues(collectionRows);
+      collectionSheet.getRange(collectionSheet.getLastRow() + 1, 1, collectionRows.length, HEADERS.collections.length).setValues(fitRowsWidth_(collectionRows, HEADERS.collections.length));
     }
     audit_(session.email, 'TOPLU_EKLENDİ', 'Taahhüt', '', pledgeRows.length + ' kayıt / ' + collectionRows.length + ' açılış tahsilatı');
   });
@@ -919,6 +919,88 @@ function bulkImportAccounting(token, payload) {
   return result;
 }
 
+function bulkImportDonations(token, payload) {
+  const session = requireApprover_(token);
+  const sourceRows = payload && Array.isArray(payload.rows) ? payload.rows : [];
+  if (!sourceRows.length) throw new Error('Dosyada aktarılacak bağış bulunamadı.');
+  if (sourceRows.length > 3000) throw new Error('Tek seferde en fazla 3000 bağış aktarabilirsiniz.');
+  const result = { imported:0, skipped:0, total:0, errors:[] };
+
+  withLock_(function() {
+    const ss = getDb_();
+    const collectionSheet = ss.getSheetByName(APP.sheets.collections);
+    const importSheet = ss.getSheetByName(APP.sheets.accountingImports);
+    if (!importSheet) throw new Error('Muhasebe aktarım sayfası bulunamadı. Önce upgradeSystem işlevini çalıştırın.');
+    if (collectionSheet.getLastColumn() < HEADERS.collections.length) {
+      const start = collectionSheet.getLastColumn() + 1;
+      const added = HEADERS.collections.slice(start - 1);
+      collectionSheet.getRange(1, start, 1, added.length).setValues([added]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#163A5F');
+    }
+
+    const existing = {};
+    const collectionLast = collectionSheet.getLastRow();
+    if (collectionLast > 1) collectionSheet.getRange(2, 19, collectionLast - 1, 1).getValues().forEach(function(r) {
+      const key = normalizeKey_(r[0]); if (key) existing[key] = true;
+    });
+    const importLast = importSheet.getLastRow();
+    if (importLast > 1) importSheet.getRange(2, 1, importLast - 1, 1).getValues().forEach(function(r) {
+      const key = normalizeKey_(r[0]); if (key) existing[key] = true;
+    });
+
+    const accounts = {};
+    optionalDataRows_(APP.sheets.cashAccounts).forEach(function(r) {
+      const item = { id:String(r[0]), name:String(r[1]), type:String(r[2] || ''), active:r[4] === true };
+      accounts[normalizeKey_(item.id)] = item;
+      accounts[normalizeKey_(item.name)] = item;
+    });
+    const collectionAdds = [];
+    const historyAdds = [];
+
+    sourceRows.forEach(function(item, index) {
+      try {
+        item = item || {};
+        const receiptNo = cleanText_(item.receiptNo, 100);
+        if (!receiptNo) throw new Error('MAKBUZ NO boş olamaz');
+        const receiptKey = normalizeKey_(receiptNo);
+        if (existing[receiptKey]) { result.skipped++; return; }
+        const date = parseFlexibleDate_(item.date, 'Tarih');
+        const name = cleanText_(item.name, 120);
+        const reference = cleanText_(item.reference, 100) || 'YURT';
+        const group = cleanText_(item.group, 100);
+        const activity = cleanText_(item.activity, 120);
+        const phone = cleanText_(item.phone, 30);
+        const paymentType = cleanText_(item.paymentType, 100);
+        if (!name || !paymentType) throw new Error('KİMİN ADINA ve ÖDEME TİPİ zorunludur');
+        const account = accounts[normalizeKey_(item.account)];
+        if (!account || !account.active) throw new Error('Aktif GİRİŞ HESABI bulunamadı: ' + cleanText_(item.account, 100));
+        const rawAmount = flexibleNumber_(item.amount);
+        if (!isFinite(rawAmount) || rawAmount <= 0) throw new Error('TAHSİLAT (TL) sıfırdan büyük olmalıdır');
+        const amount = Math.round(rawAmount * 100) / 100;
+        const accountType = normalizeHeader_(account.type + ' ' + account.name);
+        const method = accountType.indexOf('NAKIT') >= 0 ? 'Nakit' : (accountType.indexOf('POS') >= 0 || accountType.indexOf('KART') >= 0 ? 'Kart / POS' : (accountType.indexOf('BANKA') >= 0 ? 'Havale / EFT' : 'Diğer'));
+        const systemId = makeId_('HBG');
+        collectionAdds.push([
+          systemId, date, '', name, paymentType, reference, name, amount, method,
+          'Toplu bağış aktarımı · Makbuz: ' + receiptNo, session.email, new Date(), account.id, account.name,
+          'ONAYLANDI', session.email, new Date(), '', receiptNo, group, activity, phone
+        ]);
+        historyAdds.push([receiptNo, 'HIZLI BAĞIŞ', systemId, date, amount, session.email, new Date()]);
+        existing[receiptKey] = true;
+        result.imported++;
+        result.total = Math.round((result.total + amount) * 100) / 100;
+      } catch (e) {
+        result.errors.push('Satır ' + (index + 2) + ': ' + e.message);
+      }
+    });
+
+    appendRows_(collectionSheet, collectionAdds, HEADERS.collections.length);
+    appendRows_(importSheet, historyAdds, HEADERS.accountingImports.length);
+    audit_(session.email, 'TOPLU_BAĞIŞ_AKTARIMI', 'Doğrudan Gelir', '', result.imported + ' bağış / ' + result.total + ' TL / ' + result.skipped + ' tekrar / ' + result.errors.length + ' hatalı');
+  });
+  result.errors = result.errors.slice(0, 100);
+  return result;
+}
+
 function accountingType_(value) {
   const key=normalizeHeader_(value);
   const map={'TAHSILAT':'TAHSİLAT','HIZLI BAGIS':'HIZLI BAĞIŞ','PERSONEL ODEMESI':'PERSONEL ÖDEMESİ','OGRETMEN ODEMESI':'ÖĞRETMEN ÖDEMESİ'};
@@ -926,8 +1008,16 @@ function accountingType_(value) {
   return map[key];
 }
 
+function fitRowsWidth_(rows, width) {
+  return (rows || []).map(function(row) {
+    const fitted = (row || []).slice(0, width);
+    while (fitted.length < width) fitted.push('');
+    return fitted;
+  });
+}
+
 function appendRows_(sheet, rows, width) {
-  if(rows.length)sheet.getRange(sheet.getLastRow()+1,1,rows.length,width).setValues(rows);
+  if(rows.length)sheet.getRange(sheet.getLastRow()+1,1,rows.length,width).setValues(fitRowsWidth_(rows,width));
 }
 
 function isApproverSession_(session) {
@@ -1040,7 +1130,7 @@ function saveBulkCollections(token, payload) {
     const ss = getDb_();
     const collectionSheet = ss.getSheetByName(APP.sheets.collections);
     const firstAddedRow = collectionSheet.getLastRow() + 1;
-    collectionSheet.getRange(firstAddedRow, 1, collectionRows.length, HEADERS.collections.length).setValues(collectionRows);
+    collectionSheet.getRange(firstAddedRow, 1, collectionRows.length, HEADERS.collections.length).setValues(fitRowsWidth_(collectionRows, HEADERS.collections.length));
     try {
       if (isApproverSession_(session) && pledgeRows.length) ss.getSheetByName(APP.sheets.pledges).getRange(2, 9, pledgeRows.length, 3).setValues(pledgeRows.map(function(r) { return [r[8], r[9], r[10]]; }));
     } catch (e) {
@@ -2423,7 +2513,7 @@ function expenseRemainingItems_(commitments) {
 }
 
 function pledgeDto_(r) { return { id:r[0], year:r[1], donationType:r[2], fullName:r[3], phone:r[4], payer:r[5], reference:r[6], amount:n_(r[7]), paid:n_(r[8]), remaining:n_(r[9]), status:r[10], pledgeDate:isoDate_(r[11]), personnel:r[14]||'', receivableStatus:String(r[15]||'AKTİF').toUpperCase(), source:String(r[16]||'BAĞIŞ').toUpperCase(), activity:r[17]||'', subActivity:r[18]||'', accountCode:r[19]||'', group:r[20]||'', notes:r[21]||'' }; }
-function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:r[3], donationType:r[4], reference:r[5], payer:r[6], amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'' }; }
+function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:r[3], donationType:r[4], reference:r[5], payer:r[6], amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'', receiptNo:r[18]||'', group:r[19]||'', activity:r[20]||'', phone:r[21]||'' }; }
 function expenseCommitmentDto_(r, kind) { return { id:r[0], name:r[1], paymentType:r[2], period:r[3], total:n_(r[4]), paid:n_(r[5]), remaining:n_(r[6]), dueDate:isoDate_(r[7]), status:r[8], note:r[9], lessonHours:kind==='teacher'?n_(r[11]):0, hourlyRate:kind==='teacher'?n_(r[12]):0 }; }
 function expensePaymentDto_(r, commitment) { return { id:r[0], date:isoDate_(r[1]), commitmentId:r[2], name:r[3], amount:n_(r[4]), method:r[5], note:r[6], accountId:r[8]||'', accountName:r[9]||'', accrualPeriod:commitment?String(commitment[3]||''):'', paymentType:commitment?String(commitment[2]||''):'' }; }
 function staffPlanDto_(r) { return { id:r[0], name:r[1], paymentType:r[2], amount:n_(r[3]), active:r[4]===true, note:r[5] }; }
