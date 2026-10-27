@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 9,
+  cacheSchemaVersion: 10,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -21,6 +21,7 @@ const APP = Object.freeze({
     teacherCommitments: 'Öğretmen Ödemeleri',
     teacherPayments: 'Öğretmen Ödeme Hareketleri',
     accountingImports: 'Muhasebe Aktarımları',
+    userPreferences: 'Kullanıcı Tercihleri',
     audit: 'İşlem Günlüğü'
   }
 });
@@ -41,6 +42,7 @@ const HEADERS = Object.freeze({
   teacherCommitments: ['Ödeme ID','Öğretmen','Ders Adı','Dönem','Toplam Tutar','Ödenen','Kalan','Vade Tarihi','Durum','Açıklama','Oluşturma Zamanı','Ders Saati','Saatlik Ücret','Plan ID'],
   teacherPayments: ['Hareket ID','Tarih','Ödeme ID','Öğretmen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturma Zamanı','Hesap ID','Hesap Adı'],
   accountingImports: ['Muhasebe Kayıt No','İşlem Türü','Sistem Kayıt No','Tarih','Tutar','Aktaran','Aktarım Zamanı'],
+  userPreferences: ['Kullanıcı ID','Tercih Anahtarı','Değer','Güncelleme Zamanı'],
   audit: ['Zaman','Kullanıcı','İşlem','Kayıt Türü','Kayıt ID','Detay']
 });
 
@@ -50,6 +52,7 @@ const STAFF_PAYMENT_TYPES = Object.freeze([
   'Yol',
   'Sosyal Yardım'
 ]);
+const PLEDGE_COLUMN_KEYS = Object.freeze(['select','year','activity','subActivity','accountCode','fullName','payer','phone','reference','donationType','group','amount','paid','remaining','notes']);
 
 let REQUEST_DB_CACHE_ = null;
 let REQUEST_ROWS_CACHE_ = {};
@@ -102,6 +105,7 @@ function setupSystem(adminName, adminEmail, adminPin) {
   createSheet_(ss, APP.sheets.teacherCommitments, HEADERS.teacherCommitments);
   createSheet_(ss, APP.sheets.teacherPayments, HEADERS.teacherPayments);
   createSheet_(ss, APP.sheets.accountingImports, HEADERS.accountingImports);
+  createSheet_(ss, APP.sheets.userPreferences, HEADERS.userPreferences);
   createSheet_(ss, APP.sheets.audit, HEADERS.audit);
   seedCashAccounts_(ss);
 
@@ -128,6 +132,7 @@ function upgradeSystem() {
   if (!ss.getSheetByName(APP.sheets.staffPlans)) createSheet_(ss, APP.sheets.staffPlans, HEADERS.staffPlans);
   if (!ss.getSheetByName(APP.sheets.teacherPlans)) createSheet_(ss, APP.sheets.teacherPlans, HEADERS.teacherPlans);
   if (!ss.getSheetByName(APP.sheets.accountingImports)) createSheet_(ss, APP.sheets.accountingImports, HEADERS.accountingImports);
+  if (!ss.getSheetByName(APP.sheets.userPreferences)) createSheet_(ss, APP.sheets.userPreferences, HEADERS.userPreferences);
   const commitments = ss.getSheetByName(APP.sheets.staffCommitments);
   if (commitments.getLastColumn() < HEADERS.staffCommitments.length) {
     commitments.getRange(1, HEADERS.staffCommitments.length).setValue('Plan ID').setFontWeight('bold').setFontColor('#ffffff').setBackground('#163A5F');
@@ -2064,6 +2069,50 @@ function setUserActive(token, userId, active) {
   return {ok:true};
 }
 
+function userPreferencesSheet_() {
+  const ss = getDb_();
+  let sh = ss.getSheetByName(APP.sheets.userPreferences);
+  if (!sh) {
+    createSheet_(ss, APP.sheets.userPreferences, HEADERS.userPreferences);
+    sh = ss.getSheetByName(APP.sheets.userPreferences);
+  }
+  return sh;
+}
+
+function pledgeHiddenColumnsForUser_(userId) {
+  const sh = userPreferencesSheet_();
+  const lastRow = sh.getLastRow();
+  if (lastRow < 2) return [];
+  const rows = sh.getRange(2, 1, lastRow - 1, HEADERS.userPreferences.length).getValues();
+  const row = rows.find(function(r) { return String(r[0]) === String(userId) && String(r[1]) === 'pledgeHiddenColumns'; });
+  if (!row) return [];
+  try {
+    const parsed = JSON.parse(String(row[2] || '[]'));
+    return Array.isArray(parsed) ? parsed.filter(function(key, index) { return PLEDGE_COLUMN_KEYS.indexOf(key) >= 0 && parsed.indexOf(key) === index; }) : [];
+  } catch (e) {
+    return [];
+  }
+}
+
+function savePledgeColumnPreferences(token, hiddenColumns) {
+  const session = requireSession_(token);
+  const requested = Array.isArray(hiddenColumns) ? hiddenColumns : [];
+  const hidden = requested.filter(function(key, index) { return PLEDGE_COLUMN_KEYS.indexOf(key) >= 0 && requested.indexOf(key) === index; });
+  if (hidden.length >= PLEDGE_COLUMN_KEYS.length) throw new Error('En az bir sütun görünür kalmalıdır.');
+  withLock_(function() {
+    const sh = userPreferencesSheet_();
+    const lastRow = sh.getLastRow();
+    const rows = lastRow > 1 ? sh.getRange(2, 1, lastRow - 1, HEADERS.userPreferences.length).getValues() : [];
+    const index = rows.findIndex(function(r) { return String(r[0]) === String(session.userId) && String(r[1]) === 'pledgeHiddenColumns'; });
+    const value = JSON.stringify(hidden);
+    if (index >= 0) sh.getRange(index + 2, 3, 1, 2).setValues([[value, new Date()]]);
+    else sh.appendRow([session.userId, 'pledgeHiddenColumns', value, new Date()]);
+    audit_(session.email, 'TERCİH GÜNCELLENDİ', 'Kullanıcı', session.userId, 'Taahhüt görünür sütunları: ' + (PLEDGE_COLUMN_KEYS.length - hidden.length));
+  });
+  invalidateAppDataCache_();
+  return { hiddenColumns:hidden };
+}
+
 function normalizeUserRole_(value) {
   const role = String(value || '').toUpperCase();
   if (role === 'YÖNETİCİ' || role === 'MUHASEBE SORUMLUSU') return role;
@@ -2116,6 +2165,7 @@ function buildAppData_(session, filters) {
     filters: { start: isoDate_(start), end: isoDate_(end), applyToLists:applyToLists },
     donationTypes: dataRows_(APP.sheets.types).filter(r => r[1] === true).map(r => r[0]),
     methods: ['Nakit','Havale / EFT','Kredi Kartı','POS','Diğer'],
+    preferences: { pledgeHiddenColumns:pledgeHiddenColumnsForUser_(session.userId) },
     summary: {
       totalPledge: totalPledge,
       totalCollected: totalCollected,
