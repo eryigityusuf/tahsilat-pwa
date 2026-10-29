@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 14,
+  cacheSchemaVersion: 15,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -2625,14 +2625,22 @@ function groupSubActivities_(pledges, collections, periodCollections) {
   }
   function collectionName_(row) {
     const pledge = pledgeMap[String(row && row[2] || '')];
-    return pledge ? nameForPledge_(pledge) : (cleanText_(row && row[4],120) || 'Doğrudan Gelir');
+    // Bu grafik yalnızca taahhütlerin Alt Faaliyet alanını gösterir. Taahhüde
+    // bağlı olmayan teberruların ödeme tipi veya kasa adı burada kategori olamaz.
+    return pledge ? nameForPledge_(pledge) : '';
   }
   (pledges || []).forEach(function(r) {
     pledgeMap[String(r[0])] = r;
     item_(nameForPledge_(r)).pledged += Number(r[7] || 0);
   });
-  (collections || []).forEach(function(r) { item_(collectionName_(r)).collected += Number(r[7] || 0); });
-  (periodCollections || []).forEach(function(r) { item_(collectionName_(r)).period += Number(r[7] || 0); });
+  (collections || []).forEach(function(r) {
+    const name = collectionName_(r);
+    if (name) item_(name).collected += Number(r[7] || 0);
+  });
+  (periodCollections || []).forEach(function(r) {
+    const name = collectionName_(r);
+    if (name) item_(name).period += Number(r[7] || 0);
+  });
   return Object.keys(map).map(k => Object.assign(map[k], { remaining: map[k].pledged - map[k].collected }));
 }
 
