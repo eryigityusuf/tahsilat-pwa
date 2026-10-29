@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 12,
+  cacheSchemaVersion: 13,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -32,7 +32,7 @@ const HEADERS = Object.freeze({
   types: ['Bağış Türü','Aktif'],
   pledges: ['Taahhüt ID','Yıl','Bağış Türü','Ad Soyad','Telefon','Ödeyen','Referans','Taahhüt Tutarı','Ödenen','Kalan','Durum','Taahhüt Tarihi','Oluşturan','Oluşturma Zamanı','Personel','Alacak Durumu','Kayıt Kaynağı','Faaliyet','Alt Faaliyet','Hesap Kodu','Grubu','Notlar'],
   collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni','Makbuz No','Grubu','Faaliyet','Telefon'],
-  referenceTargets: ['Hedef ID','Başlangıç','Bitiş','Referans','Temin Hedefi','Tahsilat Hedefi','Aktif','Açıklama','Oluşturma Zamanı'],
+  referenceTargets: ['Hedef ID','Başlangıç','Bitiş','Referans','Temin Hedefi','Tahsilat Hedefi','Aktif','Açıklama','Oluşturma Zamanı','Hedef Türü'],
   cashAccounts: ['Hesap ID','Hesap Adı','Hesap Türü','Açılış Bakiyesi','Aktif','Açıklama','Oluşturma Zamanı'],
   loans: ['Borç ID','Alım Tarihi','Borç Veren','Alınan Tutar','Geri Ödenen','Kalan Borç','Durum','Hesap ID','Hesap Adı','Açıklama','Oluşturma Zamanı'],
   loanRepayments: ['Hareket ID','Tarih','Borç ID','Borç Veren','Tutar','Ödeme Yöntemi','Açıklama','Oluşturma Zamanı','Hesap ID','Hesap Adı'],
@@ -138,6 +138,17 @@ function upgradeSystem() {
   if (!ss.getSheetByName(APP.sheets.accountingImports)) createSheet_(ss, APP.sheets.accountingImports, HEADERS.accountingImports);
   if (!ss.getSheetByName(APP.sheets.studentPlans)) createSheet_(ss, APP.sheets.studentPlans, HEADERS.studentPlans);
   if (!ss.getSheetByName(APP.sheets.userPreferences)) createSheet_(ss, APP.sheets.userPreferences, HEADERS.userPreferences);
+  const referenceTargets = ss.getSheetByName(APP.sheets.referenceTargets);
+  if (referenceTargets.getLastColumn() < HEADERS.referenceTargets.length) {
+    const start = referenceTargets.getLastColumn() + 1;
+    const added = HEADERS.referenceTargets.slice(start - 1);
+    referenceTargets.getRange(1, start, 1, added.length).setValues([added]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#163A5F');
+  }
+  referenceTargets.getRange(1, 10).setValue('Hedef Türü').setFontWeight('bold').setFontColor('#ffffff').setBackground('#163A5F');
+  if (referenceTargets.getLastRow() > 1) {
+    const typeRange = referenceTargets.getRange(2, 10, referenceTargets.getLastRow() - 1, 1);
+    typeRange.setValues(typeRange.getValues().map(function(r) { return [referenceTargetType_(r[0])]; }));
+  }
   const commitments = ss.getSheetByName(APP.sheets.staffCommitments);
   if (commitments.getLastColumn() < HEADERS.staffCommitments.length) {
     commitments.getRange(1, HEADERS.staffCommitments.length).setValue('Plan ID').setFontWeight('bold').setFontColor('#ffffff').setBackground('#163A5F');
@@ -473,10 +484,11 @@ function generateTeacherPaymentReceiptPdf(token, paymentId) {
   }
 }
 
-function generateReferenceTargetsPdf(token, sortKey, periodKey) {
+function generateReferenceTargetsPdf(token, sortKey, periodKey, targetType) {
   const session=requireSession_(token);
   const data=buildAppData_(session,{}).referenceTargets;
-  let items=(data.items||[]).filter(function(x){return x.active;});
+  targetType=referenceTargetType_(targetType);
+  let items=(data.items||[]).filter(function(x){return x.active&&x.targetType===targetType;});
   periodKey=cleanText_(periodKey,7);
   if(/^\d{4}-\d{2}$/.test(periodKey)) items=items.filter(function(x){return String(x.start||'').slice(0,7)===periodKey;});
   const sorters={
@@ -487,32 +499,39 @@ function generateReferenceTargetsPdf(token, sortKey, periodKey) {
   };
   items=items.sort(sorters[sortKey]||sorters['collection-rate']);
   if(!items.length) throw new Error('PDF için aktif referans hedefi bulunamadı.');
-  const doc=DocumentApp.create('Referans Hedef Performans Raporu');
+  const isDonation=targetType==='TEBERRU';
+  const reportTitle=isDonation?'TEBERRU HEDEF PERFORMANS RAPORU':'TAHSİLAT HEDEF PERFORMANS RAPORU';
+  const doc=DocumentApp.create(reportTitle);
   try{
     const body=doc.getBody();
     body.setPageWidth(842).setPageHeight(595).setMarginTop(24).setMarginBottom(24).setMarginLeft(22).setMarginRight(22);
-    body.appendParagraph('REFERANS HEDEF PERFORMANS RAPORU').setAlignment(DocumentApp.HorizontalAlignment.CENTER).setBold(true).setFontSize(15).setForegroundColor('#102A43');
+    body.appendParagraph(reportTitle).setAlignment(DocumentApp.HorizontalAlignment.CENTER).setBold(true).setFontSize(15).setForegroundColor('#102A43');
     body.appendParagraph((periodKey ? 'Hedef dönemi: '+periodKey+'  ·  ' : '')+'Rapor tarihi: '+Utilities.formatDate(new Date(),'Europe/Istanbul','dd.MM.yyyy HH:mm')).setAlignment(DocumentApp.HorizontalAlignment.CENTER).setFontSize(8).setForegroundColor('#657180');
     const summary=items.reduce(function(s,x){s.pledgeTarget+=x.pledgeTarget;s.actualPledged+=x.actualPledged;s.collectionTarget+=x.collectionTarget;s.actualCollected+=x.actualCollected;return s;},{pledgeTarget:0,actualPledged:0,collectionTarget:0,actualCollected:0});
     summary.totalTarget=summary.pledgeTarget+summary.collectionTarget;
     summary.totalActual=summary.actualPledged+summary.actualCollected;
     summary.totalRate=summary.totalTarget?summary.totalActual/summary.totalTarget:0;
-    appendReferenceTargetSummaryCards_(body,summary);
+    appendReferenceTargetSummaryCards_(body,summary,targetType);
     body.appendParagraph('').setFontSize(3);
-    const rows=[['Referans','Dönem','Temin Hedefi','Temin','Temin %','Tahsilat Hedefi','Tahsilat','Temin + Tahsilat','Tahsilat %','Kalan Tahsilat','Hedef Durumu']];
-    items.forEach(function(x){rows.push([x.reference,formatDateTr_(x.start)+' - '+formatDateTr_(x.end),moneyText_(x.pledgeTarget),moneyText_(x.actualPledged),percentText_(x.pledgeRate),moneyText_(x.collectionTarget),moneyText_(x.actualCollected),moneyText_(x.totalActual),percentText_(x.collectionRate),moneyText_(x.collectionRemaining),x.achievementStatus]);});
-    rows.push(['GENEL TOPLAM','',moneyText_(summary.pledgeTarget),moneyText_(summary.actualPledged),percentText_(summary.pledgeTarget?summary.actualPledged/summary.pledgeTarget:0),moneyText_(summary.collectionTarget),moneyText_(summary.actualCollected),moneyText_(summary.actualPledged+summary.actualCollected),percentText_(summary.collectionTarget?summary.actualCollected/summary.collectionTarget:0),moneyText_(Math.max(0,(summary.collectionTarget||0)-(summary.actualCollected||0))),'']);
+    const rows=isDonation?[['Referans','Dönem','Teberru Hedefi','Teberru','Gerçekleşme %','Kalan','Hedef Durumu']]:[['Referans','Dönem','Temin Hedefi','Temin','Temin %','Tahsilat Hedefi','Tahsilat','Temin + Tahsilat','Tahsilat %','Kalan Tahsilat','Hedef Durumu']];
+    items.forEach(function(x){rows.push(isDonation?[x.reference,formatDateTr_(x.start)+' - '+formatDateTr_(x.end),moneyText_(x.collectionTarget),moneyText_(x.actualCollected),percentText_(x.collectionRate),moneyText_(x.collectionRemaining),x.achievementStatus]:[x.reference,formatDateTr_(x.start)+' - '+formatDateTr_(x.end),moneyText_(x.pledgeTarget),moneyText_(x.actualPledged),percentText_(x.pledgeRate),moneyText_(x.collectionTarget),moneyText_(x.actualCollected),moneyText_(x.totalActual),percentText_(x.collectionRate),moneyText_(x.collectionRemaining),x.achievementStatus]);});
+    rows.push(isDonation?['GENEL TOPLAM','',moneyText_(summary.collectionTarget),moneyText_(summary.actualCollected),percentText_(summary.collectionTarget?summary.actualCollected/summary.collectionTarget:0),moneyText_(Math.max(0,(summary.collectionTarget||0)-(summary.actualCollected||0))),'']:['GENEL TOPLAM','',moneyText_(summary.pledgeTarget),moneyText_(summary.actualPledged),percentText_(summary.pledgeTarget?summary.actualPledged/summary.pledgeTarget:0),moneyText_(summary.collectionTarget),moneyText_(summary.actualCollected),moneyText_(summary.actualPledged+summary.actualCollected),percentText_(summary.collectionTarget?summary.actualCollected/summary.collectionTarget:0),moneyText_(Math.max(0,(summary.collectionTarget||0)-(summary.actualCollected||0))),'']);
     styleReportTable_(body.appendTable(rows));
     body.appendParagraph('Şüpheli alacaklar hedef gerçekleşmelerine dahil edilmemiştir.').setFontSize(8).setForegroundColor('#657180');
     doc.saveAndClose();
     const pdf=DriveApp.getFileById(doc.getId()).getAs(MimeType.PDF);
-    audit_(session.email,'PDF_OLUŞTURULDU','Referans Hedefleri','',items.length+' hedef');
-    return {fileName:'referans-hedef-performans.pdf',mimeType:'application/pdf',base64:Utilities.base64Encode(pdf.getBytes())};
+    audit_(session.email,'PDF_OLUŞTURULDU',isDonation?'Teberru Hedefleri':'Tahsilat Hedefleri','',items.length+' hedef');
+    return {fileName:(isDonation?'teberru':'tahsilat')+'-hedef-performans.pdf',mimeType:'application/pdf',base64:Utilities.base64Encode(pdf.getBytes())};
   }finally{try{DriveApp.getFileById(doc.getId()).setTrashed(true);}catch(e){}}
 }
 
-function appendReferenceTargetSummaryCards_(body,summary) {
-  const cards=[
+function appendReferenceTargetSummaryCards_(body,summary,targetType) {
+  const cards=referenceTargetType_(targetType)==='TEBERRU'?[
+    ['TEBERRU HEDEFİ',moneyText_(summary.collectionTarget)],
+    ['TOPLAM TEBERRU',moneyText_(summary.actualCollected)],
+    ['KALAN',moneyText_(Math.max(0,summary.collectionTarget-summary.actualCollected))],
+    ['GERÇEKLEŞME',percentText_(summary.collectionTarget?summary.actualCollected/summary.collectionTarget:0)]
+  ]:[
     ['TEMİN HEDEFİ',moneyText_(summary.pledgeTarget)],
     ['GERÇEKLEŞEN TEMİN',moneyText_(summary.actualPledged)],
     ['TAHSİLAT HEDEFİ',moneyText_(summary.collectionTarget)],
@@ -521,7 +540,7 @@ function appendReferenceTargetSummaryCards_(body,summary) {
     ['TEMİN + TAHSİLAT',moneyText_(summary.totalActual)],
     ['GENEL GERÇEKLEŞME',percentText_(summary.totalRate)]
   ];
-  [[0,4],[4,7]].forEach(function(range,rowIndex){
+  (cards.length===4?[[0,4]]:[[0,4],[4,7]]).forEach(function(range,rowIndex){
     const table=body.appendTable([cards.slice(range[0],range[1]).map(function(card){return card[0]+'\n'+card[1];})]);
     table.setBorderColor(rowIndex===0?'#D7E0E8':'#C9A55A').setBorderWidth(1);
     const row=table.getRow(0);
@@ -1453,24 +1472,26 @@ function backupPledgeData_(pledgeSheet, collectionSheet) {
 
 function saveReferenceTarget(token, payload) {
   const session=requireAdmin_(token);payload=payload||{};
+  const targetType=referenceTargetType_(payload.targetType);
   const reference=cleanText_(payload.reference,120), start=parseDate_(payload.start,'Başlangıç tarihi'), end=parseDate_(payload.end,'Bitiş tarihi');
   if(!reference) throw new Error('Referans adı zorunludur.');
   if(end<start) throw new Error('Bitiş tarihi başlangıçtan önce olamaz.');
-  const pledgeTarget=nonNegativeNumber_(payload.pledgeTarget,'Temin hedefi'), collectionTarget=nonNegativeNumber_(payload.collectionTarget,'Tahsilat hedefi');
+  const pledgeTarget=targetType==='TEBERRU'?0:nonNegativeNumber_(payload.pledgeTarget,'Temin hedefi'), collectionTarget=nonNegativeNumber_(payload.collectionTarget,targetType==='TEBERRU'?'Teberru hedefi':'Tahsilat hedefi');
   if(pledgeTarget<=0&&collectionTarget<=0) throw new Error('En az bir hedef sıfırdan büyük olmalıdır.');
-  const duplicate=optionalDataRows_(APP.sheets.referenceTargets).some(function(r){return referenceKey_(r[3])===referenceKey_(reference)&&isoDate_(r[1])===isoDate_(start)&&isoDate_(r[2])===isoDate_(end);});
+  const duplicate=optionalDataRows_(APP.sheets.referenceTargets).some(function(r){return referenceTargetType_(r[9])===targetType&&referenceKey_(r[3])===referenceKey_(reference)&&isoDate_(r[1])===isoDate_(start)&&isoDate_(r[2])===isoDate_(end);});
   if(duplicate) throw new Error('Bu referans ve dönem için hedef zaten var.');
   const id=makeId_('HDF');
-  getDb_().getSheetByName(APP.sheets.referenceTargets).appendRow([id,start,end,reference,pledgeTarget,collectionTarget,true,cleanText_(payload.note,300),new Date()]);
-  audit_(session.email,'EKLENDİ','Referans Hedefi',id,reference);
+  getDb_().getSheetByName(APP.sheets.referenceTargets).appendRow([id,start,end,reference,pledgeTarget,collectionTarget,true,cleanText_(payload.note,300),new Date(),targetType]);
+  audit_(session.email,'EKLENDİ',targetType==='TEBERRU'?'Teberru Hedefi':'Tahsilat Hedefi',id,reference);
   return {ok:true};
 }
 
 function saveBulkReferenceTargets(token, payload) {
   const session=requireAdmin_(token);payload=payload||{};
+  const targetType=referenceTargetType_(payload.targetType);
   const range=targetMonthRange_(payload.month,'Hedef ayı');
-  const pledgeTarget=nonNegativeNumber_(payload.pledgeTarget,'Temin hedefi');
-  const collectionTarget=nonNegativeNumber_(payload.collectionTarget,'Tahsilat hedefi');
+  const pledgeTarget=targetType==='TEBERRU'?0:nonNegativeNumber_(payload.pledgeTarget,'Temin hedefi');
+  const collectionTarget=nonNegativeNumber_(payload.collectionTarget,targetType==='TEBERRU'?'Teberru hedefi':'Tahsilat hedefi');
   if(pledgeTarget<=0&&collectionTarget<=0) throw new Error('En az bir hedef sıfırdan büyük olmalıdır.');
   const source=Array.isArray(payload.references)?payload.references:[];
   if(!source.length) throw new Error('En az bir referans seçin.');
@@ -1481,9 +1502,9 @@ function saveBulkReferenceTargets(token, payload) {
   let result=null;
   withLock_(function(){
     resetRequestCache_();
-    const existing={};optionalDataRows_(APP.sheets.referenceTargets).forEach(function(r){existing[referenceKey_(r[3])+'|'+isoDate_(r[1])+'|'+isoDate_(r[2])]=true;});
+    const existing={};optionalDataRows_(APP.sheets.referenceTargets).forEach(function(r){existing[referenceTargetType_(r[9])+'|'+referenceKey_(r[3])+'|'+isoDate_(r[1])+'|'+isoDate_(r[2])]=true;});
     const rows=[];let skipped=0;const note=cleanText_(payload.note,300);
-    names.forEach(function(name){const key=normalizeKey_(name)+'|'+range.startIso+'|'+range.endIso;if(existing[key]){skipped++;return;}existing[key]=true;rows.push([makeId_('HDF'),range.start,range.end,name,pledgeTarget,collectionTarget,true,note,new Date()]);});
+    names.forEach(function(name){const key=targetType+'|'+normalizeKey_(name)+'|'+range.startIso+'|'+range.endIso;if(existing[key]){skipped++;return;}existing[key]=true;rows.push([makeId_('HDF'),range.start,range.end,name,pledgeTarget,collectionTarget,true,note,new Date(),targetType]);});
     if(rows.length) appendRows_(getDb_().getSheetByName(APP.sheets.referenceTargets),rows,HEADERS.referenceTargets.length);
     audit_(session.email,'TOPLU_EKLENDİ','Referans Hedefleri',range.key,rows.length+' hedef / '+skipped+' atlandı');
     result={ok:true,created:rows.length,skipped:skipped,period:range.label};
@@ -1493,6 +1514,7 @@ function saveBulkReferenceTargets(token, payload) {
 
 function copyReferenceTargetsMonth(token, payload) {
   const session=requireAdmin_(token);payload=payload||{};
+  const targetType=referenceTargetType_(payload.targetType);
   const source=targetMonthRange_(payload.sourceMonth,'Kaynak ay');
   const target=targetMonthRange_(payload.targetMonth,'Hedef ay');
   if(source.key===target.key) throw new Error('Kaynak ve hedef ay aynı olamaz.');
@@ -1500,11 +1522,11 @@ function copyReferenceTargetsMonth(token, payload) {
   withLock_(function(){
     resetRequestCache_();
     const all=optionalDataRows_(APP.sheets.referenceTargets);
-    const sourceRows=all.filter(function(r){return r[6]===true&&isoDate_(r[1])===source.startIso&&isoDate_(r[2])===source.endIso;});
+    const sourceRows=all.filter(function(r){return r[6]===true&&referenceTargetType_(r[9])===targetType&&isoDate_(r[1])===source.startIso&&isoDate_(r[2])===source.endIso;});
     if(!sourceRows.length) throw new Error(source.label+' döneminde devredilecek aktif hedef bulunamadı.');
-    const existing={};all.forEach(function(r){existing[normalizeKey_(r[3])+'|'+isoDate_(r[1])+'|'+isoDate_(r[2])]=true;});
+    const existing={};all.forEach(function(r){existing[referenceTargetType_(r[9])+'|'+normalizeKey_(r[3])+'|'+isoDate_(r[1])+'|'+isoDate_(r[2])]=true;});
     const rows=[];let skipped=0;
-    sourceRows.forEach(function(r){const key=referenceKey_(r[3])+'|'+target.startIso+'|'+target.endIso;if(existing[key]){skipped++;return;}existing[key]=true;const sourceNote=cleanText_(r[7],220);const carryNote=source.label+' döneminden devredildi';rows.push([makeId_('HDF'),target.start,target.end,r[3],Number(r[4])||0,Number(r[5])||0,true,cleanText_((sourceNote?sourceNote+' · ':'')+carryNote,300),new Date()]);});
+    sourceRows.forEach(function(r){const key=targetType+'|'+referenceKey_(r[3])+'|'+target.startIso+'|'+target.endIso;if(existing[key]){skipped++;return;}existing[key]=true;const sourceNote=cleanText_(r[7],220);const carryNote=source.label+' döneminden devredildi';rows.push([makeId_('HDF'),target.start,target.end,r[3],Number(r[4])||0,Number(r[5])||0,true,cleanText_((sourceNote?sourceNote+' · ':'')+carryNote,300),new Date(),targetType]);});
     if(rows.length) appendRows_(getDb_().getSheetByName(APP.sheets.referenceTargets),rows,HEADERS.referenceTargets.length);
     audit_(session.email,'AYA_DEVREDİLDİ','Referans Hedefleri',source.key+' -> '+target.key,rows.length+' hedef / '+skipped+' atlandı');
     result={ok:true,created:rows.length,skipped:skipped,sourcePeriod:source.label,targetPeriod:target.label};
@@ -1516,14 +1538,15 @@ function updateReferenceTarget(token,payload) {
   const session=requireAdmin_(token);payload=payload||{};
   const id=cleanText_(payload.id,60), row=findRowBy_(APP.sheets.referenceTargets,1,id);
   if(!row) throw new Error('Referans hedefi bulunamadı.');
+  const targetType=referenceTargetType_(payload.targetType||row.values[9]);
   const reference=cleanText_(payload.reference,120), start=parseDate_(payload.start,'Başlangıç tarihi'), end=parseDate_(payload.end,'Bitiş tarihi');
   if(!reference) throw new Error('Referans adı zorunludur.');
   if(end<start) throw new Error('Bitiş tarihi başlangıçtan önce olamaz.');
-  const pledgeTarget=nonNegativeNumber_(payload.pledgeTarget,'Temin hedefi'), collectionTarget=nonNegativeNumber_(payload.collectionTarget,'Tahsilat hedefi');
+  const pledgeTarget=targetType==='TEBERRU'?0:nonNegativeNumber_(payload.pledgeTarget,'Temin hedefi'), collectionTarget=nonNegativeNumber_(payload.collectionTarget,targetType==='TEBERRU'?'Teberru hedefi':'Tahsilat hedefi');
   if(pledgeTarget<=0&&collectionTarget<=0) throw new Error('En az bir hedef sıfırdan büyük olmalıdır.');
-  const duplicate=optionalDataRows_(APP.sheets.referenceTargets).some(function(r){return r[0]!==id&&referenceKey_(r[3])===referenceKey_(reference)&&isoDate_(r[1])===isoDate_(start)&&isoDate_(r[2])===isoDate_(end);});
+  const duplicate=optionalDataRows_(APP.sheets.referenceTargets).some(function(r){return r[0]!==id&&referenceTargetType_(r[9])===targetType&&referenceKey_(r[3])===referenceKey_(reference)&&isoDate_(r[1])===isoDate_(start)&&isoDate_(r[2])===isoDate_(end);});
   if(duplicate) throw new Error('Bu referans ve dönem için başka bir hedef var.');
-  getDb_().getSheetByName(APP.sheets.referenceTargets).getRange(row.row,2,1,7).setValues([[start,end,reference,pledgeTarget,collectionTarget,row.values[6]===true,cleanText_(payload.note,300)]]);
+  getDb_().getSheetByName(APP.sheets.referenceTargets).getRange(row.row,2,1,9).setValues([[start,end,reference,pledgeTarget,collectionTarget,row.values[6]===true,cleanText_(payload.note,300),row.values[8]||new Date(),targetType]]);
   audit_(session.email,'DÜZELTİLDİ','Referans Hedefi',id,reference);
   return {ok:true};
 }
@@ -2434,7 +2457,11 @@ function buildAppData_(session, filters) {
   const studentPledgeIds = {};
   pledgeRows.forEach(function(r) { if (isStudentPledgeRow_(r)) studentPledgeIds[String(r[0])] = true; });
   const referenceCollectionRows = collectionRows.filter(function(r) { return !studentPledgeIds[String(r[2])]; });
+  const referencePledgeCollectionRows = referenceCollectionRows.filter(function(r) { return Boolean(String(r[2] || '').trim()); });
+  const referenceDonationRows = referenceCollectionRows.filter(function(r) { return !String(r[2] || '').trim(); });
   const referencePeriodCollections = referenceCollectionRows.filter(function(r) { return inRange_(r[1], start, end); });
+  const referencePeriodPledgeCollections = referencePledgeCollectionRows.filter(function(r) { return inRange_(r[1], start, end); });
+  const referencePeriodDonations = referenceDonationRows.filter(function(r) { return inRange_(r[1], start, end); });
   const referencePeriodPledges = referencePledgeRows.filter(function(r) { return inRange_(r[11], start, end); });
   const totalPledge = sum_(pledgeRows, 7);
   const totalCollected = sum_(collectionRows, 7);
@@ -2462,7 +2489,8 @@ function buildAppData_(session, filters) {
     pledges: accessiblePledgeRows.slice().reverse().map(pledgeDto_),
     collections: (applyToLists?allCollectionRows.filter(function(r){return inRange_(r[1],start,end);}):allCollectionRows).slice().reverse().map(collectionDto_),
     donationAnalysis: groupSubActivities_(pledgeRows, collectionRows, periodCollections),
-    referenceAnalysis: groupReferences_(referencePledgeRows, referenceCollectionRows, referencePeriodCollections, referencePeriodPledges),
+    referenceAnalysis: groupReferences_(referencePledgeRows, referencePledgeCollectionRows, referencePeriodPledgeCollections, referencePeriodPledges),
+    referenceDonationAnalysis: groupDonationReferences_(referenceDonationRows, referencePeriodDonations),
     referenceTargets: referenceTargetData_(session, referencePledgeRows, referenceCollectionRows),
     cash: {
       accounts: optionalDataRows_(APP.sheets.cashAccounts).filter(function(r) { return r[4] === true; }).map(function(r) { return { id:r[0], name:r[1], type:r[2], active:true }; })
@@ -2624,6 +2652,25 @@ function groupReferences_(pledges, collections, periodCollections, periodPledges
   return Object.keys(map).map(k => Object.assign(map[k], { remaining: map[k].pledged-map[k].collected, rate: map[k].pledged ? map[k].collected/map[k].pledged : 0 })).sort((a,b)=>b.period-a.period);
 }
 
+function groupDonationReferences_(collections, periodCollections) {
+  const map = {};
+  function item_(value) {
+    const name = cleanText_(value, 120) || 'Referanssız';
+    const key = referenceKey_(name) || 'referanssiz';
+    return map[key] || (map[key] = { name:name, count:0, collected:0, period:0 });
+  }
+  (collections || []).forEach(function(r) { const x=item_(r[5]); x.count++; x.collected+=Number(r[7]||0); });
+  (periodCollections || []).forEach(function(r) { item_(r[5]).period+=Number(r[7]||0); });
+  const total = Object.keys(map).reduce(function(sum,key) { return sum + map[key].collected; }, 0);
+  const periodTotal = Object.keys(map).reduce(function(sum,key) { return sum + map[key].period; }, 0);
+  return Object.keys(map).map(function(key) {
+    const item = map[key];
+    item.rate = total ? item.collected / total : 0;
+    item.periodRate = periodTotal ? item.period / periodTotal : 0;
+    return item;
+  }).sort(function(a,b) { return b.period - a.period; });
+}
+
 function expenseData_(kind, start, end, applyToLists) {
   const cfg = expenseConfig_(kind);
   const commitments = dataRows_(cfg.commitments);
@@ -2685,18 +2732,23 @@ function referenceTargetData_(session, pledges, collections) {
   const items=rows.map(function(r){
     const start=new Date(r[1]), end=new Date(r[2]); end.setHours(23,59,59,999);
     const key=referenceKey_(r[3]);
-    const actualPledged=(pledges||[]).filter(function(p){return referenceKey_(p[6])===key&&inRange_(p[11],start,end);}).reduce(function(s,p){return s+(Number(p[7])||0);},0);
-    const actualCollected=(collections||[]).filter(function(c){return referenceKey_(c[5])===key&&inRange_(c[1],start,end);}).reduce(function(s,c){return s+(Number(c[7])||0);},0);
+    const targetType=referenceTargetType_(r[9]);
+    const actualPledged=targetType==='TEBERRU'?0:(pledges||[]).filter(function(p){return referenceKey_(p[6])===key&&inRange_(p[11],start,end);}).reduce(function(s,p){return s+(Number(p[7])||0);},0);
+    const actualCollected=(collections||[]).filter(function(c){const direct=!String(c[2]||'').trim();return direct===(targetType==='TEBERRU')&&referenceKey_(c[5])===key&&inRange_(c[1],start,end);}).reduce(function(s,c){return s+(Number(c[7])||0);},0);
     const pledgeTarget=Number(r[4])||0, collectionTarget=Number(r[5])||0;
     const startIso=isoDate_(r[1]),endIso=isoDate_(r[2]);
     const reached=(pledgeTarget<=0||actualPledged>=pledgeTarget)&&(collectionTarget<=0||actualCollected>=collectionTarget);
     const achievementStatus=reached?'Hedefe ulaşıldı':(today<startIso?'Bekliyor':(today>endIso?'Hedef tamamlanmadı':'Devam ediyor'));
-    return {id:r[0],start:startIso,end:endIso,periodKey:startIso.slice(0,7),reference:r[3],pledgeTarget:pledgeTarget,collectionTarget:collectionTarget,actualPledged:actualPledged,actualCollected:actualCollected,totalTarget:pledgeTarget+collectionTarget,totalActual:actualPledged+actualCollected,totalRate:(pledgeTarget+collectionTarget)?(actualPledged+actualCollected)/(pledgeTarget+collectionTarget):0,pledgeRate:pledgeTarget?actualPledged/pledgeTarget:0,collectionRate:collectionTarget?actualCollected/collectionTarget:0,pledgeRemaining:Math.max(0,pledgeTarget-actualPledged),collectionRemaining:Math.max(0,collectionTarget-actualCollected),achievementStatus:achievementStatus,active:r[6]===true,note:r[7]};
+    return {id:r[0],targetType:targetType,start:startIso,end:endIso,periodKey:startIso.slice(0,7),reference:r[3],pledgeTarget:pledgeTarget,collectionTarget:collectionTarget,actualPledged:actualPledged,actualCollected:actualCollected,totalTarget:pledgeTarget+collectionTarget,totalActual:actualPledged+actualCollected,totalRate:(pledgeTarget+collectionTarget)?(actualPledged+actualCollected)/(pledgeTarget+collectionTarget):0,pledgeRate:pledgeTarget?actualPledged/pledgeTarget:0,collectionRate:collectionTarget?actualCollected/collectionTarget:0,pledgeRemaining:Math.max(0,pledgeTarget-actualPledged),collectionRemaining:Math.max(0,collectionTarget-actualCollected),achievementStatus:achievementStatus,active:r[6]===true,note:r[7]};
   });
   const activeItems=items.filter(function(x){return x.active;});
   const summary={pledgeTarget:activeItems.reduce(function(s,x){return s+x.pledgeTarget;},0),actualPledged:activeItems.reduce(function(s,x){return s+x.actualPledged;},0),collectionTarget:activeItems.reduce(function(s,x){return s+x.collectionTarget;},0),actualCollected:activeItems.reduce(function(s,x){return s+x.actualCollected;},0)};
   summary.totalTarget=summary.pledgeTarget+summary.collectionTarget;summary.totalActual=summary.actualPledged+summary.actualCollected;summary.totalRate=summary.totalTarget?summary.totalActual/summary.totalTarget:0;
   return {items:items,summary:summary};
+}
+
+function referenceTargetType_(value) {
+  return String(value || '').trim().toLocaleUpperCase('tr-TR') === 'TEBERRU' ? 'TEBERRU' : 'TAHSİLAT';
 }
 function debtData_(start,end,applyToLists) {
   const loans=optionalDataRows_(APP.sheets.loans);
