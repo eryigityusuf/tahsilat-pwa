@@ -2,7 +2,7 @@ const APP_URL='https://script.google.com/macros/s/AKfycbzODsdn99mhtCfgIuWqnwpqHq
 const VALID_VIEWS=['dashboard','pledges','collections','references','approvals','cash','students','accounting','debts','staff','teacher','users'];
 const requestedView=new URLSearchParams(location.search).get('view');
 const initialView=VALID_VIEWS.includes(requestedView)?requestedView:'dashboard';
-const FRAME_URL=`${APP_URL}?v=43#${initialView}`;
+const FRAME_URL=`${APP_URL}?v=44#${initialView}`;
 const frame=document.querySelector('#appFrame');
 const loadingView=document.querySelector('#loadingView');
 const offlineView=document.querySelector('#offlineView');

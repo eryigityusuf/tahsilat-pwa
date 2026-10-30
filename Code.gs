@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 15,
+  cacheSchemaVersion: 16,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -1253,6 +1253,105 @@ function updateCollection(token, payload) {
     audit_(session.email, 'DÜZELTİLDİ', 'Tahsilat', id, amount + ' TL');
   });
   return {ok:true};
+}
+
+/**
+ * Tahsilatlar ve doğrudan teberrular için tek istekle toplu hücre düzenleme.
+ * Tüm değişiklikler önce bellekte doğrulanır; doğrulama tamamlanmadan sayfaya
+ * hiçbir veri yazılmaz. Böylece analiz ve bakiye hesapları yarım kalmaz.
+ */
+function bulkUpdateCollections(token, payload) {
+  const session = requireApprover_(token);
+  const items = payload && Array.isArray(payload.items) ? payload.items : [];
+  if (!items.length) throw new Error('Kaydedilecek değişiklik bulunamadı.');
+  if (items.length > 3000) throw new Error('Tek seferde en fazla 3000 kayıt düzenlenebilir.');
+  let result = null;
+
+  withLock_(function() {
+    const ss = getDb_();
+    const sh = ss.getSheetByName(APP.sheets.collections);
+    const lastRow = sh.getLastRow();
+    if (lastRow < 2) throw new Error('Tahsilat kaydı bulunamadı.');
+    const rows = sh.getRange(2, 1, lastRow - 1, HEADERS.collections.length).getValues();
+    const rowIndex = {};
+    rows.forEach(function(r, i) { rowIndex[String(r[0])] = i; });
+    const accounts = {};
+    optionalDataRows_(APP.sheets.cashAccounts).forEach(function(r) { accounts[String(r[0])] = r; });
+    const seen = {};
+    const affectedPledges = {};
+    const cashDeltas = {};
+
+    items.forEach(function(item) {
+      item = item || {};
+      const id = cleanText_(item.id, 60);
+      if (!id || seen[id]) throw new Error('Geçersiz veya tekrarlanan tahsilat numarası: ' + id);
+      seen[id] = true;
+      if (rowIndex[id] == null) throw new Error('Tahsilat bulunamadı: ' + id);
+      const changes = item.changes && typeof item.changes === 'object' ? item.changes : {};
+      const has = function(key) { return Object.prototype.hasOwnProperty.call(changes, key); };
+      const row = rows[rowIndex[id]];
+      const oldRow = row.slice();
+      const pledgeId = String(row[2] || '');
+
+      if (has('date')) row[1] = parseDate_(changes.date, 'Tahsilat tarihi');
+      if (has('fullName')) row[3] = cleanText_(changes.fullName, 120);
+      if (has('donationType')) row[4] = cleanText_(changes.donationType, 80);
+      if (has('reference')) row[5] = cleanText_(changes.reference, 100);
+      if (has('payer')) row[6] = cleanText_(changes.payer, 120);
+      if (has('amount')) row[7] = positiveNumber_(changes.amount, 'Tahsilat tutarı');
+      if (has('method')) row[8] = cleanText_(changes.method, 50);
+      if (has('note')) row[9] = cleanText_(changes.note, 300);
+      if (has('receiptNo')) row[18] = cleanText_(changes.receiptNo, 100);
+      if (has('group')) row[19] = cleanText_(changes.group, 100);
+      if (has('activity')) row[20] = cleanText_(changes.activity, 120);
+      if (has('phone')) row[21] = cleanText_(changes.phone, 30);
+
+      const accountId = has('accountId') ? cleanText_(changes.accountId, 60) : String(row[12] || '');
+      const account = accounts[accountId];
+      if (!account || account[4] !== true) throw new Error(id + ': aktif bir kasa veya banka hesabı seçin.');
+      row[12] = account[0];
+      row[13] = account[1];
+
+      if (!pledgeId && (!row[3] || !row[4] || !row[5])) {
+        throw new Error(id + ': Teberru için hesap adı, nevi ve referans zorunludur.');
+      }
+      if (pledgeId) {
+        const pledge = findRowBy_(APP.sheets.pledges, 1, pledgeId);
+        if (!pledge) throw new Error(id + ': bağlı taahhüt bulunamadı.');
+        if (String(pledge.values[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') throw new Error(id + ': bağlı taahhüt şüpheli alacaklarda.');
+        affectedPledges[pledgeId] = pledge;
+      }
+
+      if (isCollectionApprovedRow_(oldRow)) {
+        const oldAccountId = String(oldRow[12] || '');
+        if (oldAccountId) cashDeltas[oldAccountId] = (cashDeltas[oldAccountId] || 0) - (Number(oldRow[7]) || 0);
+        cashDeltas[accountId] = (cashDeltas[accountId] || 0) + (Number(row[7]) || 0);
+      }
+    });
+
+    // Aynı taahhüde ait birden fazla satır birlikte değiştirildiğinde toplamı
+    // tek tek değil, yeni tablonun bütünü üzerinden kontrol eder.
+    const reservedByPledge = {};
+    rows.forEach(function(r) {
+      const pledgeId = String(r[2] || '');
+      const status = collectionApprovalStatus_(r);
+      if (pledgeId && status !== 'REDDEDİLDİ') reservedByPledge[pledgeId] = (reservedByPledge[pledgeId] || 0) + (Number(r[7]) || 0);
+    });
+    Object.keys(affectedPledges).forEach(function(pledgeId) {
+      const pledgeAmount = Number(affectedPledges[pledgeId].values[7]) || 0;
+      if ((reservedByPledge[pledgeId] || 0) > pledgeAmount + 0.001) {
+        throw new Error(pledgeId + ': Tahsilat toplamı taahhüt tutarını aşamaz.');
+      }
+    });
+    assertCashDeltas_(cashDeltas, 'Toplu tahsilat düzeltme');
+
+    sh.getRange(2, 1, rows.length, HEADERS.collections.length).setValues(rows);
+    resetRequestCache_();
+    Object.keys(affectedPledges).forEach(recalculatePledge_);
+    audit_(session.email, 'TOPLU_DÜZELTİLDİ', 'Tahsilat', '', items.length + ' kayıt');
+    result = { ok:true, updated:items.length, recalculatedPledges:Object.keys(affectedPledges).length };
+  });
+  return result;
 }
 
 function deleteCollection(token, collectionId) {
