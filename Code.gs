@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 16,
+  cacheSchemaVersion: 17,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -2724,9 +2724,16 @@ function groupSubActivities_(pledges, collections, periodCollections) {
   }
   function collectionName_(row) {
     const pledge = pledgeMap[String(row && row[2] || '')];
-    // Bu grafik yalnızca taahhütlerin Alt Faaliyet alanını gösterir. Taahhüde
-    // bağlı olmayan teberruların ödeme tipi veya kasa adı burada kategori olamaz.
-    return pledge ? nameForPledge_(pledge) : '';
+    if (pledge) return nameForPledge_(pledge);
+    // Doğrudan teberrular yalnızca mevcut bir alt faaliyet satırıyla eşleşirse
+    // grafiğe eklenir. Öncelik Faaliyet alanındadır; Nevi ikinci seçenektir.
+    // Böylece Nakit/Banka gibi yöntem veya hesap adları yeni kategori oluşturmaz.
+    const candidates = [row && row[20], row && row[4]];
+    for (let i = 0; i < candidates.length; i++) {
+      const key = normalizeKey_(cleanText_(candidates[i], 120));
+      if (key && map[key]) return map[key].name;
+    }
+    return '';
   }
   (pledges || []).forEach(function(r) {
     pledgeMap[String(r[0])] = r;
