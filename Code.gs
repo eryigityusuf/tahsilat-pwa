@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 17,
+  cacheSchemaVersion: 18,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -2582,6 +2582,7 @@ function buildAppData_(session, filters) {
     pledges: accessiblePledgeRows.slice().reverse().map(pledgeDto_),
     collections: (applyToLists?allCollectionRows.filter(function(r){return inRange_(r[1],start,end);}):allCollectionRows).slice().reverse().map(collectionDto_),
     donationAnalysis: groupSubActivities_(pledgeRows, collectionRows, periodCollections),
+    activityAnalysis: groupActivities_(pledgeRows, collectionRows, periodCollections),
     referenceAnalysis: groupReferences_(referencePledgeRows, referencePledgeCollectionRows, referencePeriodPledgeCollections, referencePeriodPledges),
     referenceDonationAnalysis: groupDonationReferences_(referenceDonationRows, referencePeriodDonations),
     referenceTargets: referenceTargetData_(session, referencePledgeRows, referenceCollectionRows),
@@ -2748,6 +2749,47 @@ function groupSubActivities_(pledges, collections, periodCollections) {
     if (name) item_(name).period += Number(r[7] || 0);
   });
   return Object.keys(map).map(k => Object.assign(map[k], { remaining: map[k].pledged - map[k].collected }));
+}
+
+function groupActivities_(pledges, collections, periodCollections) {
+  const map = {};
+  const pledgeMap = {};
+  const paymentChannelKeys = {
+    'NAKIT':true, 'BANKA':true, 'HAVALE':true, 'EFT':true, 'POS':true,
+    'KREDI KARTI':true, 'HAVALE / EFT':true, 'KART / POS':true, 'DIGER':true
+  };
+  function nameForPledge_(row) {
+    return cleanText_(row && row[17],120) || cleanText_(row && row[2],120) || 'Belirtilmemiş';
+  }
+  function item_(name) {
+    name = cleanText_(name,120) || 'Belirtilmemiş';
+    const key = normalizeKey_(name) || 'belirtilmemis';
+    return map[key] || (map[key] = { name:name, pledged:0, collected:0, period:0 });
+  }
+  function collectionName_(row) {
+    const pledge = pledgeMap[String(row && row[2] || '')];
+    if (pledge) return nameForPledge_(pledge);
+    const activity = cleanText_(row && row[20],120);
+    if (activity) return activity;
+    const legacyType = cleanText_(row && row[4],120);
+    const legacyKey = normalizeHeader_(legacyType);
+    return legacyType && !paymentChannelKeys[legacyKey] ? legacyType : '';
+  }
+  (pledges || []).forEach(function(r) {
+    pledgeMap[String(r[0])] = r;
+    item_(nameForPledge_(r)).pledged += Number(r[7] || 0);
+  });
+  (collections || []).forEach(function(r) {
+    const name = collectionName_(r);
+    if (name) item_(name).collected += Number(r[7] || 0);
+  });
+  (periodCollections || []).forEach(function(r) {
+    const name = collectionName_(r);
+    if (name) item_(name).period += Number(r[7] || 0);
+  });
+  return Object.keys(map).map(function(k) {
+    return Object.assign(map[k], { remaining:map[k].pledged - map[k].collected });
+  });
 }
 
 function groupReferences_(pledges, collections, periodCollections, periodPledges) {
