@@ -354,7 +354,10 @@ function login(email, pin) {
   };
   CacheService.getScriptCache().put('session:' + token, JSON.stringify(session), APP.sessionSeconds);
   audit_(email, 'GİRİŞ', 'Oturum', session.userId, 'Başarılı giriş.');
-  return { token: token, data: getCachedAppData_(session, {}, false) };
+  // Giriş yanıtını küçük tutun. Büyük uygulama verisi istemciden ikinci bir
+  // çağrıyla alınır; böylece Apps Script büyük yanıtı boş/null döndürse bile
+  // oturum oluşturma güvenilir kalır.
+  return { token: token, user: session };
 }
 
 function logout(token) {

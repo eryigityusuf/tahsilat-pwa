@@ -3,7 +3,7 @@ const state={token:'',data:null,view:'dashboard',pages:{},approvalTab:'all',pled
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='48';
+const PWA_BUILD='49';
 let deferredInstallPrompt=null;
 let backgroundOperationCount=0;
 let dataSyncRequested=0;
@@ -29,7 +29,7 @@ function shareSessionWithPwa(){if(state.token)messagePwa('TAHSILAT_SESSION_STORE
 function requestSessionFromPwa(){messagePwa('TAHSILAT_SESSION_REQUEST')}
 async function restoreSharedSession(token){if(state.data||sharedSessionRecoveryRunning||typeof token!=='string'||token.length<12||token.length>500)return;sharedSessionRecoveryRunning=true;try{state.token=token;localStorage.setItem('tahsilat_token',token);acceptAppData(await server('getAppData',token,{},false));openApp()}catch(e){state.token='';localStorage.removeItem('tahsilat_token');messagePwa('TAHSILAT_SESSION_CLEAR')}finally{sharedSessionRecoveryRunning=false}}
 window.addEventListener('message',event=>{if(event.origin!==PWA_PARENT_ORIGIN||event.source!==window.top||!event.data)return;if(event.data.type==='TAHSILAT_SESSION_TOKEN')restoreSharedSession(event.data.token)});
-$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();setBusy(true);try{const r=await server('login',$('#loginEmail').value,$('#loginPin').value);state.token=r.token;acceptAppData(r.data);localStorage.setItem('tahsilat_token',state.token);openApp()}catch(err){toast(err.message,true)}finally{setBusy(false)}});
+$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();setBusy(true);try{const r=await server('login',$('#loginEmail').value,$('#loginPin').value);if(!r||typeof r.token!=='string'||r.token.length<12)throw new Error('Oturum oluşturulamadı. Lütfen tekrar deneyin.');state.token=r.token;localStorage.setItem('tahsilat_token',state.token);acceptAppData(await server('getAppData',state.token,{},false));openApp()}catch(err){state.token='';localStorage.removeItem('tahsilat_token');toast(err.message||'Giriş işlemi tamamlanamadı.',true)}finally{setBusy(false)}});
 $('#logoutBtn').onclick=async()=>{messagePwa('TAHSILAT_SESSION_CLEAR');try{await server('logout',state.token)}catch(e){} localStorage.removeItem('tahsilat_token');location.reload()};
 $('#menuBtn').onclick=()=>document.querySelector('.sidebar').classList.toggle('open');
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e});
