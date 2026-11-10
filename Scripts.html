@@ -3,7 +3,8 @@ const state={token:'',data:null,view:'dashboard',pages:{},approvalTab:'all',pled
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='50';
+const PWA_BUILD='51';
+const SUPABASE_API='https://yrhirwtwokzmixfbjlde.supabase.co/functions/v1/tahsilat-api';
 let deferredInstallPrompt=null;
 let backgroundOperationCount=0;
 let dataSyncRequested=0;
@@ -12,19 +13,14 @@ let dataSyncRunning=false;
 let sharedSessionRecoveryRunning=false;
 const $=s=>document.querySelector(s); const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const money=v=>new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(Number(v)||0); const date=v=>v?new Intl.DateTimeFormat('tr-TR').format(new Date(v+'T12:00:00')):'—';
-function server(name,...args){return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(new Error(e.message||e)))[name](...args));}
+async function server(name,...args){
+  const response=await fetch(SUPABASE_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({method:name,args:args,requestId:crypto.randomUUID()})});
+  const result=await response.json().catch(()=>null);
+  if(!response.ok||!result?.ok)throw new Error(result?.error?.message||'Sunucu işlemi tamamlanamadı.');
+  return result.data;
+}
 async function loadAppData(filters={},forceRefresh=false){
-  const manifest=await server('beginAppDataTransfer',state.token,filters,forceRefresh===true);
-  if(!manifest||typeof manifest.transferId!=='string'||!Number.isInteger(Number(manifest.count))||manifest.count<1)throw new Error('Uygulama verisi hazırlanamadı.');
-  const parts=new Array(Number(manifest.count));
-  for(let start=0;start<parts.length;start+=6){
-    const indexes=[];for(let i=start;i<Math.min(parts.length,start+6);i++)indexes.push(i);
-    const batch=await Promise.all(indexes.map(i=>server('getAppDataTransferChunk',state.token,manifest.transferId,i)));
-    batch.forEach((part,i)=>{if(typeof part!=='string')throw new Error('Uygulama verisinin bir parçası alınamadı.');parts[indexes[i]]=part});
-  }
-  const json=parts.join('');
-  if(manifest.length&&json.length!==Number(manifest.length))throw new Error('Uygulama verisi eksik alındı. Sayfayı yenileyin.');
-  const data=JSON.parse(json);
+  const data=await server('getAppData',state.token,filters,forceRefresh===true);
   if(!data||!data.user||!data.filters||!data.summary)throw new Error('Uygulama verisi geçersiz.');
   return data;
 }
