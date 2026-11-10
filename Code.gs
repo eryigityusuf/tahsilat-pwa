@@ -370,6 +370,56 @@ function getAppData(token, filters, forceRefresh) {
 }
 
 /**
+ * Büyük uygulama verisini google.script.run yanıt sınırına takılmadan taşır.
+ * İstemci önce bu küçük manifesti, ardından numaralı parçaları indirir.
+ */
+function beginAppDataTransfer(token, filters, forceRefresh) {
+  const session = requireSession_(token);
+  const data = getCachedAppData_(session, filters || {}, forceRefresh === true);
+  const json = JSON.stringify(data);
+  const chunkSize = 30000;
+  const count = Math.ceil(json.length / chunkSize);
+  if (!count || count > 200) throw new Error('Uygulama verisi güvenli aktarım sınırını aşıyor. Tarih filtresini daraltın.');
+  const transferId = Utilities.getUuid();
+  const baseKey = 'transfer:' + transferId;
+  const entries = {};
+  entries[baseKey + ':meta'] = JSON.stringify({
+    userId: session.userId,
+    count: count,
+    length: json.length,
+    hash: sha256Hex_(json)
+  });
+  for (let i = 0; i < count; i++) {
+    let end = Math.min(json.length, (i + 1) * chunkSize);
+    // UTF-16 eş karakter çiftini iki ayrı yanıta bölmeyin.
+    if (end < json.length && /[\uD800-\uDBFF]/.test(json.charAt(end - 1))) end--;
+    const start = i === 0 ? 0 : Number(entries[baseKey + ':end:' + (i - 1)] || i * chunkSize);
+    entries[baseKey + ':' + i] = json.slice(start, end);
+    entries[baseKey + ':end:' + i] = String(end);
+  }
+  // Yardımcı bitiş anahtarlarını önbelleğe yazmayın.
+  Object.keys(entries).filter(function(key) { return key.indexOf(':end:') !== -1; }).forEach(function(key) { delete entries[key]; });
+  CacheService.getScriptCache().putAll(entries, 300);
+  return { transferId: transferId, count: count, length: json.length, hash: sha256Hex_(json) };
+}
+
+function getAppDataTransferChunk(token, transferId, index) {
+  const session = requireSession_(token);
+  const id = cleanText_(transferId, 80);
+  const partIndex = Number(index);
+  if (!id || !Number.isInteger(partIndex) || partIndex < 0 || partIndex > 199) throw new Error('Geçersiz veri parçası isteği.');
+  const cache = CacheService.getScriptCache();
+  const baseKey = 'transfer:' + id;
+  const rawMeta = cache.get(baseKey + ':meta');
+  if (!rawMeta) throw new Error('Veri aktarımının süresi doldu. Sayfayı yenileyin.');
+  const meta = JSON.parse(rawMeta);
+  if (meta.userId !== session.userId || partIndex >= meta.count) throw new Error('Bu veri aktarımına erişim yetkiniz yok.');
+  const chunk = cache.get(baseKey + ':' + partIndex);
+  if (chunk === null) throw new Error('Veri parçası bulunamadı. Sayfayı yenileyin.');
+  return chunk;
+}
+
+/**
  * Aynı kullanıcı ve filtre için hazırlanmış uygulama verisini kısa süreli önbellekten döndürür.
  * Her veri değişikliğinde sürüm yenilendiği için eski sonuçlar kendiliğinden kullanım dışı kalır.
  */
@@ -3688,6 +3738,43 @@ function parseFlexibleDate_(value,label) {
 }
 function inRange_(v,start,end){ const d=v instanceof Date?v:new Date(v); return !isNaN(d.getTime())&&d>=start&&d<=end; }
 function isoDate_(v){ if(!v)return ''; const d=v instanceof Date?v:new Date(v); if(isNaN(d.getTime()))return ''; return Utilities.formatDate(d,'Europe/Istanbul','yyyy-MM-dd'); }
+
+// GEÇİCİ: Supabase ilk veri aktarımı tamamlanınca kaldırılacaktır.
+function migrateToSupabaseOnce() {
+  const endpoint = 'https://yrhirwtwokzmixfbjlde.supabase.co/functions/v1/tahsilat-api';
+  const importKey = PropertiesService.getScriptProperties().getProperty('SUPABASE_IMPORT_KEY');
+  if (!importKey) throw new Error('SUPABASE_IMPORT_KEY proje özelliği bulunamadı.');
+  const job = Utilities.getUuid();
+  const db = getDb_();
+  const sheets = db.getSheets();
+  const sizes = {};
+  sheets.forEach(function(sheet) { sizes[sheet.getName()] = Math.max(1, sheet.getLastRow()); });
+  const props = PropertiesService.getScriptProperties().getProperties();
+  props.TAHSILAT_DB_ID = props.TAHSILAT_DB_ID || 'supabase';
+  function send(body) {
+    const response = UrlFetchApp.fetch(endpoint, {
+      method:'post',
+      contentType:'application/json',
+      headers:{ 'x-tahsilat-import-key':importKey },
+      payload:JSON.stringify(body),
+      muteHttpExceptions:true
+    });
+    const text = response.getContentText();
+    const parsed = JSON.parse(text || '{}');
+    if (response.getResponseCode() >= 300 || !parsed.ok) throw new Error((parsed.error && parsed.error.message) || ('Supabase HTTP ' + response.getResponseCode()));
+    return parsed.data;
+  }
+  send({ action:'importStart', job:job, manifest:{ sizes:sizes, props:props } });
+  sheets.forEach(function(sheet) {
+    const rows = sheet.getRange(1, 1, sizes[sheet.getName()], Math.max(1, sheet.getLastColumn())).getValues();
+    for (let start = 0; start < rows.length; start += 100) {
+      send({ action:'importChunk', job:job, sheet:sheet.getName(), start:start + 1, rows:rows.slice(start, start + 100) });
+    }
+  });
+  const result = send({ action:'importFinish', job:job });
+  Logger.log(JSON.stringify(result));
+  return result;
+}
 function n_(v){ return Number(v)||0; }
 function sum_(rows,index){ return rows.reduce((s,r)=>s+(Number(r[index])||0),0); }
 function makeId_(prefix){ return prefix+'-'+Utilities.formatDate(new Date(),'Europe/Istanbul','yyyyMMddHHmmss')+'-'+Math.floor(1000+Math.random()*9000); }

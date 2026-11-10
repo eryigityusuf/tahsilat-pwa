@@ -3,7 +3,7 @@ const state={token:'',data:null,view:'dashboard',pages:{},approvalTab:'all',pled
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='49';
+const PWA_BUILD='50';
 let deferredInstallPrompt=null;
 let backgroundOperationCount=0;
 let dataSyncRequested=0;
@@ -13,6 +13,21 @@ let sharedSessionRecoveryRunning=false;
 const $=s=>document.querySelector(s); const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const money=v=>new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(Number(v)||0); const date=v=>v?new Intl.DateTimeFormat('tr-TR').format(new Date(v+'T12:00:00')):'—';
 function server(name,...args){return new Promise((resolve,reject)=>google.script.run.withSuccessHandler(resolve).withFailureHandler(e=>reject(new Error(e.message||e)))[name](...args));}
+async function loadAppData(filters={},forceRefresh=false){
+  const manifest=await server('beginAppDataTransfer',state.token,filters,forceRefresh===true);
+  if(!manifest||typeof manifest.transferId!=='string'||!Number.isInteger(Number(manifest.count))||manifest.count<1)throw new Error('Uygulama verisi hazırlanamadı.');
+  const parts=new Array(Number(manifest.count));
+  for(let start=0;start<parts.length;start+=6){
+    const indexes=[];for(let i=start;i<Math.min(parts.length,start+6);i++)indexes.push(i);
+    const batch=await Promise.all(indexes.map(i=>server('getAppDataTransferChunk',state.token,manifest.transferId,i)));
+    batch.forEach((part,i)=>{if(typeof part!=='string')throw new Error('Uygulama verisinin bir parçası alınamadı.');parts[indexes[i]]=part});
+  }
+  const json=parts.join('');
+  if(manifest.length&&json.length!==Number(manifest.length))throw new Error('Uygulama verisi eksik alındı. Sayfayı yenileyin.');
+  const data=JSON.parse(json);
+  if(!data||!data.user||!data.filters||!data.summary)throw new Error('Uygulama verisi geçersiz.');
+  return data;
+}
 function toast(msg,error=false){const el=$('#toast');el.textContent=msg;el.className='toast show'+(error?' error':'');clearTimeout(toast.t);toast.t=setTimeout(()=>el.className='toast',3000)}
 function acceptAppData(data){state.data=data;state.pledgeHiddenColumns=Array.isArray(data?.preferences?.pledgeHiddenColumns)?data.preferences.pledgeHiddenColumns.slice():[];state.collectionHiddenColumns=Array.isArray(data?.preferences?.collectionHiddenColumns)?data.preferences.collectionHiddenColumns.slice():[];updateSyncStatus()}
 function updateSyncStatus(){const el=$('#syncStatus');if(!el||!state.data)return;const meta=state.data._meta||{};const cached=meta.source==='server-cache';el.classList.toggle('cached',cached);const label=el.querySelector('strong');if(label)label.textContent=cached?'Hızlı önbellek':'Canlı veri';el.title=meta.generatedAt?`Son veri hazırlama: ${new Date(meta.generatedAt).toLocaleString('tr-TR')}`:'Veriler güncel';}
@@ -20,23 +35,23 @@ function showSyncingStatus(){const el=$('#syncStatus');if(!el)return;el.classLis
 function isApprover(){return ['YÖNETİCİ','MUHASEBE SORUMLUSU'].includes(state.data?.user?.role)}
 function roleLabel(role){return role==='YÖNETİCİ'?'Yönetici':role==='MUHASEBE SORUMLUSU'?'Muhasebe sorumlusu':'Tahsilat kullanıcısı'}
 function updateProfile(){if(!state.data?.user)return;$('#profileName').textContent=state.data.user.name;$('#profileRole').textContent=roleLabel(state.data.user.role)}
-function scheduleDataSync(){dataSyncRequested++;showSyncingStatus();if(dataSyncRunning)return;dataSyncRunning=true;(async()=>{while(dataSyncProcessed<dataSyncRequested){const ticket=dataSyncRequested;const filters=currentFilters();const filterKey=JSON.stringify(filters);try{const fresh=await server('getAppData',state.token,filters,false);if(ticket===dataSyncRequested&&filterKey===JSON.stringify(currentFilters())){acceptAppData(fresh);updateProfile();render()}}catch(e){toast('Veri eşitleme: '+e.message,true)}dataSyncProcessed=ticket}dataSyncRunning=false;$('#syncStatus')?.classList.remove('syncing');updateSyncStatus()})()}
+function scheduleDataSync(){dataSyncRequested++;showSyncingStatus();if(dataSyncRunning)return;dataSyncRunning=true;(async()=>{while(dataSyncProcessed<dataSyncRequested){const ticket=dataSyncRequested;const filters=currentFilters();const filterKey=JSON.stringify(filters);try{const fresh=await loadAppData(filters,false);if(ticket===dataSyncRequested&&filterKey===JSON.stringify(currentFilters())){acceptAppData(fresh);updateProfile();render()}}catch(e){toast('Veri eşitleme: '+e.message,true)}dataSyncProcessed=ticket}dataSyncRunning=false;$('#syncStatus')?.classList.remove('syncing');updateSyncStatus()})()}
 function setBusy(b=true){backgroundOperationCount=Math.max(0,backgroundOperationCount+(b?1:-1));const busy=backgroundOperationCount>0;document.body.classList.toggle('operation-running',busy);const status=$('#backgroundStatus');if(status){status.classList.toggle('hidden',!busy);const label=status.querySelector('strong');if(label)label.textContent=backgroundOperationCount>1?`${backgroundOperationCount} işlem arka planda sürüyor`:'İşlem arka planda sürüyor';}const loginButton=$('#loginForm button[type="submit"]');if(loginButton)loginButton.disabled=busy;const apply=$('#applyFilter');if(apply)apply.disabled=busy;const logout=$('#logoutBtn');if(logout)logout.disabled=busy;document.querySelectorAll('#modal .btn.primary').forEach(x=>x.disabled=busy);if(b){const modal=$('#modal');setTimeout(()=>{if(modal&&modal.open)modal.close()},0)}}
 function statusClass(s){return /Kapandı|Ödendi|Aktif|ONAYLANDI/.test(s)?'green':/Kısmi|BEKLİYOR/.test(s)?'amber':'red'}
 
 function messagePwa(type,extra={}){if(window.top===window)return;window.top.postMessage(Object.assign({type:type},extra),PWA_PARENT_ORIGIN)}
 function shareSessionWithPwa(){if(state.token)messagePwa('TAHSILAT_SESSION_STORE',{token:state.token})}
 function requestSessionFromPwa(){messagePwa('TAHSILAT_SESSION_REQUEST')}
-async function restoreSharedSession(token){if(state.data||sharedSessionRecoveryRunning||typeof token!=='string'||token.length<12||token.length>500)return;sharedSessionRecoveryRunning=true;try{state.token=token;localStorage.setItem('tahsilat_token',token);acceptAppData(await server('getAppData',token,{},false));openApp()}catch(e){state.token='';localStorage.removeItem('tahsilat_token');messagePwa('TAHSILAT_SESSION_CLEAR')}finally{sharedSessionRecoveryRunning=false}}
+async function restoreSharedSession(token){if(state.data||sharedSessionRecoveryRunning||typeof token!=='string'||token.length<12||token.length>500)return;sharedSessionRecoveryRunning=true;try{state.token=token;localStorage.setItem('tahsilat_token',token);acceptAppData(await loadAppData({},false));openApp()}catch(e){state.token='';localStorage.removeItem('tahsilat_token');messagePwa('TAHSILAT_SESSION_CLEAR');toast(e.message||'Oturum yüklenemedi.',true)}finally{sharedSessionRecoveryRunning=false}}
 window.addEventListener('message',event=>{if(event.origin!==PWA_PARENT_ORIGIN||event.source!==window.top||!event.data)return;if(event.data.type==='TAHSILAT_SESSION_TOKEN')restoreSharedSession(event.data.token)});
-$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();setBusy(true);try{const r=await server('login',$('#loginEmail').value,$('#loginPin').value);if(!r||typeof r.token!=='string'||r.token.length<12)throw new Error('Oturum oluşturulamadı. Lütfen tekrar deneyin.');state.token=r.token;localStorage.setItem('tahsilat_token',state.token);acceptAppData(await server('getAppData',state.token,{},false));openApp()}catch(err){state.token='';localStorage.removeItem('tahsilat_token');toast(err.message||'Giriş işlemi tamamlanamadı.',true)}finally{setBusy(false)}});
+$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();setBusy(true);try{const r=await server('login',$('#loginEmail').value,$('#loginPin').value);if(!r||typeof r.token!=='string'||r.token.length<12)throw new Error('Oturum oluşturulamadı. Lütfen tekrar deneyin.');state.token=r.token;localStorage.setItem('tahsilat_token',state.token);acceptAppData(await loadAppData({},false));openApp()}catch(err){state.token='';state.data=null;localStorage.removeItem('tahsilat_token');$('#appView').classList.add('hidden');$('#loginView').classList.remove('hidden');toast(err.message||'Giriş işlemi tamamlanamadı.',true)}finally{setBusy(false)}});
 $('#logoutBtn').onclick=async()=>{messagePwa('TAHSILAT_SESSION_CLEAR');try{await server('logout',state.token)}catch(e){} localStorage.removeItem('tahsilat_token');location.reload()};
 $('#menuBtn').onclick=()=>document.querySelector('.sidebar').classList.toggle('open');
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e});
 $('#installBtn').onclick=async()=>{if(deferredInstallPrompt){deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;return;}showModal('Telefona ekle',`<div class="install-help"><p><strong>Android / Chrome:</strong> Tarayıcı menüsünü açın ve “Ana ekrana ekle” veya “Uygulamayı yükle” seçeneğine dokunun.</p><p><strong>iPhone / Safari:</strong> Paylaş düğmesine dokunun, ardından “Ana Ekrana Ekle” seçeneğini seçin.</p><p>Eklenen simgeden açtığınızda sistem telefon ekranına uygun çalışır. Veriler güvenlik nedeniyle çevrimdışı saklanmaz; internet bağlantısı gerekir.</p></div>`)};
 $('#applyFilter').onclick=()=>refresh({start:$('#startDate').value,end:$('#endDate').value,applyToLists:$('#filterLists').checked});
 
-async function boot(){const saved=localStorage.getItem('tahsilat_token');if(!saved){requestSessionFromPwa();return}try{state.token=saved;acceptAppData(await server('getAppData',saved,{},false));openApp()}catch(e){localStorage.removeItem('tahsilat_token');state.token='';requestSessionFromPwa()}}
+async function boot(){const saved=localStorage.getItem('tahsilat_token');if(!saved){requestSessionFromPwa();return}try{state.token=saved;acceptAppData(await loadAppData({},false));openApp()}catch(e){localStorage.removeItem('tahsilat_token');state.token='';state.data=null;$('#appView').classList.add('hidden');$('#loginView').classList.remove('hidden');toast(e.message||'Oturum verileri yüklenemedi.',true);requestSessionFromPwa()}}
 function requestedView(){const candidate=String(location.hash||'').replace(/^#/,'');return ['dashboard','pledges','collections','references','approvals','cash','students','accounting','expenses','debts','staff','teacher','users'].includes(candidate)?candidate:'dashboard'}
 function navigateToView(view,updateHash=true){state.view=view||'dashboard';if(updateHash&&location.hash!==`#${state.view}`)history.pushState(null,'',`#${state.view}`);document.querySelector('.sidebar')?.classList.remove('open');buildNav();render()}
 function openApp(){ $('#loginView').classList.add('hidden');$('#appView').classList.remove('hidden');$('#profileName').textContent=state.data.user.name;$('#profileRole').textContent=roleLabel(state.data.user.role);$('#startDate').value=state.data.filters.start;$('#endDate').value=state.data.filters.end;$('#filterLists').checked=Boolean(state.data.filters.applyToLists);state.view=requestedView();updateSyncStatus();buildNav();render();shareSessionWithPwa() }
@@ -45,9 +60,9 @@ function buildNav(){const admin=state.data.user.role==='YÖNETİCİ';const appro
 $('#homeBrand').href=pwaViewUrl('dashboard');
 $('#homeBrand').onclick=e=>{if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;e.preventDefault();navigateToView('dashboard')};
 window.addEventListener('hashchange',()=>{if(state.data&&requestedView()!==state.view)navigateToView(requestedView(),false)});
-async function refresh(filters){setBusy(true);try{acceptAppData(await server('getAppData',state.token,filters||{start:$('#startDate').value,end:$('#endDate').value,applyToLists:$('#filterLists').checked},true));$('#startDate').value=state.data.filters.start;$('#endDate').value=state.data.filters.end;$('#filterLists').checked=Boolean(state.data.filters.applyToLists);render();toast('Veriler veritabanından yenilendi.')}catch(e){toast(e.message,true)}finally{setBusy(false)}}
+async function refresh(filters){setBusy(true);try{acceptAppData(await loadAppData(filters||{start:$('#startDate').value,end:$('#endDate').value,applyToLists:$('#filterLists').checked},true));$('#startDate').value=state.data.filters.start;$('#endDate').value=state.data.filters.end;$('#filterLists').checked=Boolean(state.data.filters.applyToLists);render();toast('Veriler veritabanından yenilendi.')}catch(e){toast(e.message,true)}finally{setBusy(false)}}
 function currentFilters(){return {start:$('#startDate').value,end:$('#endDate').value,applyToLists:$('#filterLists').checked}}
-async function reloadCurrentFilters(){acceptAppData(await server('getAppData',state.token,currentFilters(),false))}
+async function reloadCurrentFilters(){acceptAppData(await loadAppData(currentFilters(),false))}
 function heading(title,hint){$('#pageTitle').textContent=title;$('#pageHint').textContent=hint||''}
 function render(){const views={dashboard:renderDashboard,pledges:renderPledges,collections:renderCollections,references:renderReferences,approvals:renderApprovals,students:renderStudents,accounting:renderAccounting,cash:renderCash,expenses:renderGeneralExpenses,debts:renderDebts,staff:()=>renderExpense('staff'),teacher:()=>renderExpense('teacher'),users:renderUsers};(views[state.view]||renderDashboard)()}
 function cards(items){return `<div class="cards">${items.map(x=>{const action=x[2]||'';return `<article class="card ${action?'clickable-card':''}" ${action?`onclick="${action}" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${action}}"`:''}><span>${esc(x[0])}</span><strong>${x[1]}</strong>${action?'<em>Detayı görmek için tıklayın</em>':''}</article>`}).join('')}</div>`}
