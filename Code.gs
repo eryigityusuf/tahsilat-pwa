@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 18,
+  cacheSchemaVersion: 19,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -522,6 +522,160 @@ function generateReferenceTargetsPdf(token, sortKey, periodKey, targetType) {
     audit_(session.email,'PDF_OLUŞTURULDU','Teberru ve Tahsilat Hedefleri','',items.length+' hedef');
     return {fileName:'teberru-tahsilat-hedef-performans.pdf',mimeType:'application/pdf',base64:Utilities.base64Encode(pdf.getBytes())};
   }finally{try{DriveApp.getFileById(doc.getId()).setTrashed(true);}catch(e){}}
+}
+
+function generateFullDataBackup(token) {
+  const session = requireAdmin_(token);
+  const ss = getDb_();
+  const exportedAt = new Date();
+  const stamp = Utilities.formatDate(exportedAt, 'Europe/Istanbul', 'yyyyMMdd-HHmmss');
+  const seen = {};
+  const sheetNames = Object.keys(APP.sheets).map(function(key) { return APP.sheets[key]; }).filter(function(name) {
+    if (seen[name]) return false;
+    seen[name] = true;
+    return true;
+  });
+  const backup = {
+    format:'TAHSILAT_TAM_VERI_YEDEGI',
+    version:1,
+    application:APP.name,
+    exportedAt:exportedAt.toISOString(),
+    timeZone:'Europe/Istanbul',
+    spreadsheetId:ss.getId(),
+    sheets:[]
+  };
+  let totalRows = 0;
+  sheetNames.forEach(function(name) {
+    const sheet = ss.getSheetByName(name);
+    if (!sheet) return;
+    const range = sheet.getDataRange();
+    const values = range.getValues();
+    const serialized = values.map(function(row) { return row.map(backupValue_); });
+    const rowCount = Math.max(0, values.length - 1);
+    totalRows += rowCount;
+    backup.sheets.push({ name:name, rowCount:rowCount, values:serialized });
+  });
+  const jsonName = 'tahsilat-tam-veri-yedegi-' + stamp + '.json';
+  const jsonBlob = Utilities.newBlob(JSON.stringify(backup), 'application/json;charset=utf-8', jsonName);
+  const bytes = jsonBlob.getBytes();
+  if (bytes.length > 45 * 1024 * 1024) throw new Error('Yedek dosyası 45 MB sınırını aşıyor. Veri sayfalarını dönemlere ayırarak yedekleyin.');
+  audit_(session.email, 'TAM_YEDEK_İNDİRİLDİ', 'Sistem', '', backup.sheets.length + ' sayfa / ' + totalRows + ' veri satırı');
+  return {
+    fileName:jsonName,
+    mimeType:'application/json;charset=utf-8',
+    base64:Utilities.base64Encode(bytes),
+    sheetCount:backup.sheets.length,
+    rowCount:totalRows,
+    exportedAt:isoDate_(exportedAt)
+  };
+}
+
+function backupValue_(value) {
+  if (value instanceof Date && !isNaN(value.getTime())) return { type:'date', value:value.toISOString() };
+  if (typeof value === 'number') return { type:'number', value:value };
+  if (typeof value === 'boolean') return { type:'boolean', value:value };
+  return { type:'text', value:String(value == null ? '' : value) };
+}
+
+function restorePledgeBackup(token, payload) {
+  const session = requireAdmin_(token);
+  payload = payload || {};
+  if (String(payload.confirmationText || '').trim().toUpperCase() !== 'TAAHHÜTLERİ GERİ YÜKLE') {
+    throw new Error('Geri yükleme onayı geçersiz.');
+  }
+  const sourceType = String(payload.sourceType || '').toLowerCase();
+  let pledgeRows = [], collectionRows = [];
+  if (sourceType === 'drive') {
+    const spreadsheetId = spreadsheetIdFromInput_(payload.driveUrl);
+    const backup = SpreadsheetApp.openById(spreadsheetId);
+    pledgeRows = restoreRowsFromSheet_(backup.getSheetByName(APP.sheets.pledges));
+    collectionRows = restoreRowsFromSheet_(backup.getSheetByName(APP.sheets.collections));
+  } else if (sourceType === 'json') {
+    const raw = String(payload.jsonText || '');
+    if (!raw || raw.length > 25 * 1024 * 1024) throw new Error('JSON yedek dosyası boş veya 25 MB sınırını aşıyor.');
+    let backup;
+    try { backup = JSON.parse(raw); } catch (e) { throw new Error('JSON yedek dosyası okunamadı.'); }
+    if (!backup || backup.format !== 'TAHSILAT_TAM_VERI_YEDEGI' || !Array.isArray(backup.sheets)) {
+      throw new Error('Bu dosya geçerli bir Tahsilat Yönetimi tam veri yedeği değil.');
+    }
+    pledgeRows = restoreRowsFromJsonBackup_(backup, APP.sheets.pledges);
+    collectionRows = restoreRowsFromJsonBackup_(backup, APP.sheets.collections);
+  } else {
+    throw new Error('Geri yükleme kaynağı seçilmedi.');
+  }
+  if (!pledgeRows.length && !collectionRows.length) throw new Error('Yedekte geri yüklenecek taahhüt veya tahsilat bulunamadı.');
+  if (pledgeRows.length > 20000 || collectionRows.length > 50000) throw new Error('Yedek tek işlemde geri yükleme sınırını aşıyor.');
+
+  const result = { restoredPledges:0, restoredCollections:0, skippedPledges:0, skippedCollections:0 };
+  withLock_(function() {
+    resetRequestCache_();
+    const ss = getDb_();
+    const pledgeSheet = ss.getSheetByName(APP.sheets.pledges);
+    const collectionSheet = ss.getSheetByName(APP.sheets.collections);
+    const existingPledgeIds = {};
+    const existingCollectionIds = {};
+    dataRows_(APP.sheets.pledges).forEach(function(row) { if (row[0]) existingPledgeIds[String(row[0])] = true; });
+    dataRows_(APP.sheets.collections).forEach(function(row) { if (row[0]) existingCollectionIds[String(row[0])] = true; });
+
+    const pledgesToAdd = [];
+    fitRowsWidth_(pledgeRows, HEADERS.pledges.length).forEach(function(row) {
+      const id = String(row[0] || '').trim();
+      if (!id || existingPledgeIds[id]) { result.skippedPledges++; return; }
+      existingPledgeIds[id] = true;
+      pledgesToAdd.push(row);
+      result.restoredPledges++;
+    });
+    appendRows_(pledgeSheet, pledgesToAdd, HEADERS.pledges.length);
+
+    const collectionsToAdd = [];
+    const affectedPledgeIds = {};
+    fitRowsWidth_(collectionRows, HEADERS.collections.length).forEach(function(row) {
+      const id = String(row[0] || '').trim();
+      const pledgeId = String(row[2] || '').trim();
+      if (!id || !pledgeId || !existingPledgeIds[pledgeId] || existingCollectionIds[id]) { result.skippedCollections++; return; }
+      existingCollectionIds[id] = true;
+      collectionsToAdd.push(row);
+      affectedPledgeIds[pledgeId] = true;
+      result.restoredCollections++;
+    });
+    appendRows_(collectionSheet, collectionsToAdd, HEADERS.collections.length);
+    pledgesToAdd.forEach(function(row) { affectedPledgeIds[String(row[0])] = true; });
+    resetRequestCache_();
+    Object.keys(affectedPledgeIds).forEach(recalculatePledge_);
+    audit_(session.email, 'YEDEKTEN_GERİ_YÜKLENDİ', 'Taahhütler', '', result.restoredPledges + ' taahhüt / ' + result.restoredCollections + ' tahsilat');
+  });
+  return result;
+}
+
+function spreadsheetIdFromInput_(value) {
+  const text = String(value || '').trim();
+  const match = text.match(/\/spreadsheets\/d\/([a-zA-Z0-9_-]+)/) || text.match(/^([a-zA-Z0-9_-]{20,})$/);
+  if (!match) throw new Error('Geçerli Google E-Tablo yedek bağlantısını veya dosya kimliğini girin.');
+  return match[1];
+}
+
+function restoreRowsFromSheet_(sheet) {
+  if (!sheet || sheet.getLastRow() < 2) return [];
+  return sheet.getRange(2, 1, sheet.getLastRow() - 1, sheet.getLastColumn()).getValues();
+}
+
+function restoreRowsFromJsonBackup_(backup, sheetName) {
+  const source = backup.sheets.filter(function(sheet) { return sheet && sheet.name === sheetName; })[0];
+  if (!source || !Array.isArray(source.values) || source.values.length < 2) return [];
+  return source.values.slice(1).map(function(row) {
+    return (row || []).map(restoreBackupValue_);
+  });
+}
+
+function restoreBackupValue_(cell) {
+  if (!cell || typeof cell !== 'object' || !Object.prototype.hasOwnProperty.call(cell, 'type')) return cell == null ? '' : cell;
+  if (cell.type === 'date') {
+    const date = new Date(cell.value);
+    return isNaN(date.getTime()) ? '' : date;
+  }
+  if (cell.type === 'number') return Number(cell.value) || 0;
+  if (cell.type === 'boolean') return cell.value === true || String(cell.value).toLowerCase() === 'true';
+  return String(cell.value == null ? '' : cell.value);
 }
 
 function appendReferenceTargetSummaryCards_(body,summary) {
