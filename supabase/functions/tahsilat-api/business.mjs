@@ -3384,7 +3384,7 @@ function cashData_(collections) {
   const accounts=optionalDataRows_(APP.sheets.cashAccounts).map(function(r){return cashAccountDto_(r,collections,staffPayments,teacherPayments,loans,loanRepayments,currentExpensePayments,receiptExpenses);});
   return {
     accounts:accounts,
-    totalBalance:accounts.reduce(function(s,a){return s+a.balance;},0),
+    totalBalance:accounts.filter(function(a){return a.active;}).reduce(function(s,a){return s+a.balance;},0),
     totalCollected:accounts.reduce(function(s,a){return s+a.collected;},0),
     totalBorrowed:accounts.reduce(function(s,a){return s+a.borrowed;},0),
     totalStaffExpense:accounts.reduce(function(s,a){return s+a.staffExpense;},0),

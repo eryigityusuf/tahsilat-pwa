@@ -2,7 +2,7 @@ const state={token:'',data:null,view:'dashboard',pages:{},approvalTab:'all',pled
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='57';
+const PWA_BUILD='58';
 const SUPABASE_API='https://yrhirwtwokzmixfbjlde.supabase.co/functions/v1/tahsilat-api';
 let deferredInstallPrompt=null;
 let backgroundOperationCount=0;
@@ -387,17 +387,20 @@ function renderCash(){
   heading('Kasa / Banka','Gelirler, personel ve öğretmen ödemeleri, cari ödemeler ve fiş giderlerinin net bakiyesi');
   const admin=state.data.user.role==='YÖNETİCİ';
   const cash=state.data.cash||{accounts:[],totalBalance:0,totalCollected:0};
+  const activeAccounts=(cash.accounts||[]).filter(x=>x.active);
+  const balanceByTypes=types=>activeAccounts.filter(x=>types.includes(String(x.type||'').toUpperCase())).reduce((sum,x)=>sum+(Number(x.balance)||0),0);
+  const cashBalances=[['Nakit mevcudu',money(balanceByTypes(['KASA']))],['Banka mevcudu',money(balanceByTypes(['BANKA','POS']))],['Döviz mevcudu',money(balanceByTypes(['DÖVİZ']))],['Çek mevcudu',money(balanceByTypes(['ÇEK']))],['Altın mevcudu',money(balanceByTypes(['ALTIN']))],['Net kasa / banka',money(cash.totalBalance)]];
   const rows=[...cash.accounts].sort((a,b)=>b.balance-a.balance).map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td class="money">${money(x.openingBalance)}</td><td class="money income-cell">${money(x.collected)}</td><td class="money finance-cell">${money(x.borrowed)}</td><td class="money expense-cell">${money(x.staffExpense)}</td><td class="money expense-cell">${money(x.teacherExpense)}</td><td class="money expense-cell">${money(x.currentExpense)}</td><td class="money expense-cell">${money(x.receiptExpense)}</td><td class="money expense-cell">${money(x.debtRepaid)}</td><td class="money">${money(x.balance)}</td><td><span class="status ${x.active?'green':'red'}">${x.active?'Aktif':'Pasif'}</span></td>${admin?`<td><div class="row-actions"><button class="btn tiny" onclick="editCashAccountModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny ${x.active?'danger':'secondary'}" onclick="toggleCashAccount('${esc(x.id)}',${!x.active})">${x.active?'Pasif':'Aktif'}</button></div></td>`:''}</tr>`);
   const headers=['Hesap','Tür','Açılış','Tahsilat','Borç Alımı','Personel','Öğretmen','Cari','Fiş','Borç Ödeme','Net Bakiye','Durum'];if(admin)headers.push('İşlem');
   const actions=admin?'<div class="actions"><button class="btn secondary" onclick="runSystemMaintenance()">Bakiyeleri doğrula</button><button class="btn primary" onclick="cashAccountModal()">Yeni hesap</button></div>':'';
-  $('#content').innerHTML=cards([['Tahsilat geliri',money(cash.totalCollected)],['Borç girişi',money(cash.totalBorrowed)],['Toplam çıkış',money(cash.totalExpense)],['Net kasa / banka',money(cash.totalBalance)]])+panel('Gelir - gider ve finansman hesapları',table(headers,rows),actions);
+  $('#content').innerHTML=cards(cashBalances)+cards([['Tahsilat geliri',money(cash.totalCollected)],['Borç girişi',money(cash.totalBorrowed)],['Toplam çıkış',money(cash.totalExpense)]])+panel('Gelir - gider ve finansman hesapları',`<div class="upload-note cash-summary-note"><strong>Kasa özeti yalnızca aktif hesapları içerir.</strong><span>Pasif hesaplar ve geçmiş hareketleri aşağıdaki listede korunur ancak mevcut ve net toplamları etkilemez.</span></div>${table(headers,rows)}`,actions);
 }
 function cashAccountModal(){
-  const fields=inputField('Hesap adı','fCashName')+selectField('Hesap türü','fCashType',['KASA','BANKA','POS','DİĞER'])+inputField('Açılış bakiyesi','fCashOpening','number',false,'min="0" step="0.01" value="0"')+inputField('Açıklama','fCashNote','text',true);
+  const fields=inputField('Hesap adı','fCashName')+selectField('Hesap türü','fCashType',['KASA','BANKA','POS','DÖVİZ','ÇEK','ALTIN','DİĞER'])+inputField('Açılış bakiyesi','fCashOpening','number',false,'min="0" step="0.01" value="0"')+inputField('Açıklama','fCashNote','text',true);
   showModal('Yeni kasa / banka hesabı',formHtml(fields,'submitCashAccount()'));
 }
 async function submitCashAccount(){await submit('saveCashAccount',{name:$('#fCashName').value,type:$('#fCashType').value,openingBalance:$('#fCashOpening').value,note:$('#fCashNote').value})}
-function editCashAccountModal(id){const x=(state.data.cash?.accounts||[]).find(r=>r.id===id);if(!x)return;showModal('Kasa / banka hesabını düzelt',formHtml(inputField('Hesap adı','fCashName','text',false,`value="${esc(x.name)}"`)+selectField('Hesap türü','fCashType',['KASA','BANKA','POS','DİĞER'])+inputField('Açılış bakiyesi','fCashOpening','number',false,`min="0" step="0.01" value="${x.openingBalance}"`)+inputField('Açıklama','fCashNote','text',true,`value="${esc(x.note||'')}"`),`submitCashAccountEdit('${esc(id)}')`));$('#fCashType').value=x.type}
+function editCashAccountModal(id){const x=(state.data.cash?.accounts||[]).find(r=>r.id===id);if(!x)return;showModal('Kasa / banka hesabını düzelt',formHtml(inputField('Hesap adı','fCashName','text',false,`value="${esc(x.name)}"`)+selectField('Hesap türü','fCashType',['KASA','BANKA','POS','DÖVİZ','ÇEK','ALTIN','DİĞER'])+inputField('Açılış bakiyesi','fCashOpening','number',false,`min="0" step="0.01" value="${x.openingBalance}"`)+inputField('Açıklama','fCashNote','text',true,`value="${esc(x.note||'')}"`),`submitCashAccountEdit('${esc(id)}')`));$('#fCashType').value=x.type}
 async function submitCashAccountEdit(id){await submit('updateCashAccount',{id:id,name:$('#fCashName').value,type:$('#fCashType').value,openingBalance:$('#fCashOpening').value,note:$('#fCashNote').value})}
 async function runSystemMaintenance(){if(!confirm('Taahhüt, tahakkuk, cari ve borç bakiyeleri hareketlerden yeniden hesaplansın mı?'))return;setBusy(true);try{const r=await server('reconcileSystem',state.token);const c=r.counts;alert(`Doğrulama tamamlandı.\nTaahhüt: ${c.pledges}\nPersonel tahakkuku: ${c.staff}\nÖğretmen tahakkuku: ${c.teachers}\nCari gider: ${c.currentExpenses||0}\nBorç: ${c.loans}`+(r.negativeAccounts.length?'\n\nDikkat: Eksi hesaplar: '+r.negativeAccounts.map(x=>x.name+' '+money(x.balance)).join(', '):'\n\nEksi hesap bulunmadı.'));scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}}
 async function toggleCashAccount(id,active){if(!active&&!confirm('Bu hesap yeni tahsilat girişlerine kapatılsın mı? Mevcut bakiye korunur.'))return;await submit('setCashAccountActive',id,active)}
