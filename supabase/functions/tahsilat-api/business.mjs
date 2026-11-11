@@ -66,8 +66,8 @@ const STAFF_PAYMENT_TYPES = Object.freeze([
 ]);
 const CURRENT_EXPENSE_TYPES = Object.freeze(['İaşe','Adak Kurban','Kırtasiye','Eğitim','Takvim']);
 const RECEIPT_EXPENSE_TYPES = Object.freeze(['Elektrik Faturası','Su Faturası','Doğalgaz Faturası','İaşe','Araç Yakıt']);
-const PLEDGE_COLUMN_KEYS = Object.freeze(['select','year','activity','subActivity','accountCode','fullName','payer','phone','reference','donationType','group','amount','paid','remaining','notes']);
-const COLLECTION_COLUMN_KEYS = Object.freeze(['year','activity','subActivity','accountCode','fullName','payer','phone','reference','donationType','group','accrual','paid','remaining','notes','date','receiptNo','id','method','accountName','approvalStatus','actions']);
+const PLEDGE_COLUMN_KEYS = Object.freeze(['select','year','activity','subActivity','fullName','payer','phone','reference','donationType','group','amount','paid','remaining','notes']);
+const COLLECTION_COLUMN_KEYS = Object.freeze(['year','activity','subActivity','fullName','payer','phone','reference','donationType','group','accrual','paid','remaining','notes','date','receiptNo','id','method','accountName','approvalStatus','actions']);
 
 let REQUEST_DB_CACHE_ = null;
 let REQUEST_ROWS_CACHE_ = {};
@@ -472,14 +472,14 @@ function generatePersonnelPledgePdf(token, personnelName) {
     body.appendParagraph('Şüpheli alacak: ' + moneyText_(sum_(doubtful, 9)) + '    Toplam kayıt: ' + pledges.length);
 
     body.appendParagraph('Taahhütler').setHeading(DocumentApp.ParagraphHeading.HEADING2);
-    const pledgeTable = [['Sene','Nevi','Hesap','Ödeyen','Referans','Bakiye','Ödenen','Kalan','Durum']];
+    const pledgeTable = [['Sene','Referans Nevi','Hesap','Ödeyen','Referans','Bakiye','Ödenen','Kalan','Durum']];
     pledges.forEach(function(r) {
       pledgeTable.push([String(r[1]||''),String(r[2]||''),String(r[3]||''),String(r[5]||''),String(r[6]||''),moneyText_(r[7]),moneyText_(r[8]),moneyText_(r[9]),String(r[15]||'AKTİF')]);
     });
     styleReportTable_(body.appendTable(pledgeTable));
 
     body.appendParagraph('Tahsilat hareketleri').setHeading(DocumentApp.ParagraphHeading.HEADING2);
-    const collectionTable = [['Tarih','Hesap','Nevi','Referans','Ödeyen','Tutar','Yöntem','Kasa / Banka']];
+    const collectionTable = [['Tarih','Hesap','Referans Nevi','Referans','Ödeyen','Tutar','Yöntem','Kasa / Banka']];
     collections.forEach(function(r) {
       collectionTable.push([isoDate_(r[1]),String(r[3]||''),String(r[4]||''),String(r[5]||''),String(r[6]||''),moneyText_(r[7]),String(r[8]||''),String(r[13]||'')]);
     });
@@ -805,7 +805,7 @@ function savePledge(token, payload) {
   const fullName = cleanText_(payload.fullName, 120);
   const reference = isApproverSession_(session) ? cleanText_(payload.reference, 100) : session.reference;
   if (!isFinite(year) || year < 1900 || year > 2100) throw new Error('Yıl geçersiz.');
-  if (!donationType || !fullName || !reference) throw new Error('Nevi, hesap adı ve referans zorunludur.');
+  if (!donationType || !fullName || !reference) throw new Error('Referans Nevi, hesap adı ve referans zorunludur.');
   const date = new Date(year, 0, 1, 12, 0, 0, 0);
   const id = makeId_('TAA');
   withLock_(function() {
@@ -831,7 +831,7 @@ function updatePledge(token, payload) {
   const fullName = cleanText_(payload.fullName, 120);
   const reference = cleanText_(payload.reference, 100);
   if (!isFinite(year) || year < 1900 || year > 2100) throw new Error('Yıl geçersiz.');
-  if (!donationType || !fullName || !reference) throw new Error('Nevi, hesap adı ve referans zorunludur.');
+  if (!donationType || !fullName || !reference) throw new Error('Referans Nevi, hesap adı ve referans zorunludur.');
   const date = new Date(year, 0, 1, 12, 0, 0, 0);
   withLock_(function() {
     const current = findRowBy_(APP.sheets.pledges, 1, id);
@@ -1032,7 +1032,7 @@ function bulkSavePledges(token, payload) {
       const suppliedRemaining = item.remaining === '' || item.remaining == null ? null : flexibleNumber_(item.remaining);
 
       if (!isFinite(year) || year < 1900 || year > 2100) throw new Error('YIL geçersiz');
-      if (!type) throw new Error('NEVİ boş olamaz');
+      if (!type) throw new Error('REFERANS NEVİ boş olamaz');
       if (!account) throw new Error('HESAP ADI boş olamaz');
       if (!reference) throw new Error('REFERANS boş olamaz');
       if (!isFinite(balance) || balance <= 0) throw new Error('TAHAKKUK (TL) sıfırdan büyük olmalıdır');
