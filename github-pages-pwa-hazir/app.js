@@ -2,7 +2,7 @@ const state={token:'',data:null,view:'dashboard',pages:{},approvalTab:'all',pled
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='56';
+const PWA_BUILD='57';
 const SUPABASE_API='https://yrhirwtwokzmixfbjlde.supabase.co/functions/v1/tahsilat-api';
 let deferredInstallPrompt=null;
 let backgroundOperationCount=0;
@@ -749,7 +749,7 @@ function downloadPledgeTemplate(){
   toast('Taahhüt şablonu indirildi.');
 }
 function bulkPledgeModal(){
-  const fields=`<label class="wide">Muhasebe sisteminden alınan CSV dosyası<input id="fBulkFile" type="file" accept=".csv,.txt,text/csv,text/plain" required></label><div class="wide upload-note"><strong>13 sütun başlığını değiştirmeyin.</strong><span>TAHAKKUK (TL) toplam taahhüttür. ÖDENEN (TL) boşsa 0 kabul edilir. KALAN (TL), TAHAKKUK (TL) − ÖDENEN (TL) olmalıdır.</span><span>Dosyayı Excel'de CSV UTF-8 biçiminde kaydedin. Faaliyet, Alt Faaliyet, Referans Nevi, Takip Eden ve Notlar bilgileri ayrıca saklanır.</span></div>`;
+  const fields=`<label class="wide">Muhasebe sisteminden alınan CSV dosyası<input id="fBulkFile" type="file" accept=".csv,.txt,text/csv,text/plain" required></label><div class="wide upload-note"><strong>13 sütun başlığını değiştirmeyin.</strong><span>Taahhütlerde KALAN (TL), TAHAKKUK (TL) − ÖDENEN (TL) olmalıdır. Teberruda TAHAKKUK (TL) ve KALAN (TL) 0 yazılır; ÖDENEN (TL) doğrudan gelir olarak Teberrular sekmesine aktarılır.</span><span>Dosyayı Excel'de CSV UTF-8 biçiminde kaydedin. Faaliyet, Alt Faaliyet, Referans Nevi, Takip Eden ve Notlar bilgileri ayrıca saklanır.</span></div>`;
   showModal('Toplu taahhüt ekle',formHtml(fields,'submitBulkPledges()'));
 }
 function personnelPdfModal(){
@@ -843,7 +843,7 @@ async function submitBulkPledges(){
     const rows=matrix.slice(1).filter(r=>r.some(v=>String(v||'').trim()!=='')).map(r=>({year:r[col.YIL]||'',activity:r[col.FAALIYET]||'',subActivity:r[col['ALT FAALIYET']]||'',accountCode:'',account:r[col['HESAP ADI']]||'',payer:r[col['KIMIN ADINA']]||'',phone:r[col['ILETISIM TEL']]||'',reference:r[col.REFERANS]||'',type:r[col['REFERANS NEVI']]||'',group:r[col['TAKIP EDEN']]||'',personnel:'',balance:r[col['TAHAKKUK (TL)']]||'',paid:r[col['ODENEN (TL)']]||'',remaining:r[col['KALAN (TL)']]||'',notes:r[col.NOTLAR]||''}));
     if(!rows.length)throw new Error('Dosyada aktarılacak kayıt bulunamadı.');
     const result=await server('bulkSavePledges',state.token,{rows:rows});
-    $('#modal').close();toast(`${result.imported} taahhüt ve ${result.openingCollections} açılış tahsilatı eklendi.`);scheduleDataSync();
+    $('#modal').close();toast(`${result.imported} taahhüt, ${result.directDonations||0} teberru ve ${result.openingCollections} açılış tahsilatı eklendi.`);scheduleDataSync();
   }catch(e){alert(e.message);toast(e.message,true)}finally{setBusy(false)}
 }
 function collectionModal(preselectedId=''){

@@ -1010,6 +1010,7 @@ function bulkSavePledges(token, payload) {
 
   const pledgeRows = [];
   const collectionRows = [];
+  let directDonationCount = 0;
   const errors = [];
   sourceRows.forEach(function(item, index) {
     try {
@@ -1035,16 +1036,29 @@ function bulkSavePledges(token, payload) {
       if (!type) throw new Error('REFERANS NEVİ boş olamaz');
       if (!account) throw new Error('HESAP ADI boş olamaz');
       if (!reference) throw new Error('REFERANS boş olamaz');
-      if (!isFinite(balance) || balance <= 0) throw new Error('TAHAKKUK (TL) sıfırdan büyük olmalıdır');
+      if (!isFinite(balance) || balance < 0) throw new Error('TAHAKKUK (TL) negatif olamaz');
       if (!isFinite(paid) || paid < 0) throw new Error('ÖDENEN (TL) geçersiz');
-      if (paid > balance) throw new Error('ÖDENEN (TL), TAHAKKUK (TL) tutarından büyük olamaz');
+      const directDonation = balance === 0;
+      if (directDonation && paid <= 0) throw new Error('Teberru için ÖDENEN (TL) sıfırdan büyük olmalıdır');
+      if (!directDonation && paid > balance) throw new Error('ÖDENEN (TL), TAHAKKUK (TL) tutarından büyük olamaz');
       const remaining = Math.round((balance - paid) * 100) / 100;
-      if (suppliedRemaining != null && (!isFinite(suppliedRemaining) || Math.abs(suppliedRemaining - remaining) > 0.01)) {
+      const expectedRemaining = directDonation ? 0 : remaining;
+      if (suppliedRemaining != null && (!isFinite(suppliedRemaining) || Math.abs(suppliedRemaining - expectedRemaining) > 0.01)) {
         throw new Error('KALAN (TL), TAHAKKUK (TL) - ÖDENEN (TL) ile uyuşmuyor');
       }
 
-      const id = makeId_('TAA');
       const pledgeDate = new Date(year, 0, 1, 12, 0, 0);
+      if (directDonation) {
+        collectionRows.push([
+          makeId_('HBG'), pledgeDate, '', account, type, reference, payer, paid,
+          'Devir', 'Toplu aktarımdan doğrudan teberru', session.email, new Date(),
+          'HSP-DEVIR', 'Devir / Belirsiz', 'ONAYLANDI', session.email, new Date(), '', '', group, activity, phone
+        ]);
+        directDonationCount++;
+        return;
+      }
+
+      const id = makeId_('TAA');
       pledgeRows.push([
         id, year, type, account, phone, payer, reference, balance, paid, remaining,
         remaining <= 0 ? 'Kapandı' : (paid > 0 ? 'Kısmi' : 'Ödenmedi'),
@@ -1071,14 +1085,14 @@ function bulkSavePledges(token, payload) {
       const added = HEADERS.pledges.slice(start - 1);
       pledgeSheet.getRange(1, start, 1, added.length).setValues([added]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#163A5F');
     }
-    pledgeSheet.getRange(pledgeSheet.getLastRow() + 1, 1, pledgeRows.length, HEADERS.pledges.length).setValues(pledgeRows);
+    if (pledgeRows.length) pledgeSheet.getRange(pledgeSheet.getLastRow() + 1, 1, pledgeRows.length, HEADERS.pledges.length).setValues(pledgeRows);
     if (collectionRows.length) {
       const collectionSheet = ss.getSheetByName(APP.sheets.collections);
       collectionSheet.getRange(collectionSheet.getLastRow() + 1, 1, collectionRows.length, HEADERS.collections.length).setValues(fitRowsWidth_(collectionRows, HEADERS.collections.length));
     }
-    audit_(session.email, 'TOPLU_EKLENDİ', 'Taahhüt', '', pledgeRows.length + ' kayıt / ' + collectionRows.length + ' açılış tahsilatı');
+    audit_(session.email, 'TOPLU_EKLENDİ', 'Taahhüt / Teberru', '', pledgeRows.length + ' taahhüt / ' + directDonationCount + ' teberru / ' + (collectionRows.length - directDonationCount) + ' açılış tahsilatı');
   });
-  return { imported:pledgeRows.length, openingCollections:collectionRows.length };
+  return { imported:pledgeRows.length, openingCollections:collectionRows.length - directDonationCount, directDonations:directDonationCount };
 }
 
 function bulkImportAccounting(token, payload) {
