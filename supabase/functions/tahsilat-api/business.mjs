@@ -52,7 +52,7 @@ const HEADERS = Object.freeze({
   currentExpenses: ['Cari ID','Cari Yılı','Cari Adı','Nevi','Tutar','Ödenen','Kalan','Durum','Açıklama','Oluşturma Zamanı'],
   currentExpensePayments: ['Hareket ID','Tarih','Cari ID','Cari Adı','Tutar','Ödeme Yöntemi','Hesap ID','Hesap Adı','Açıklama','Oluşturma Zamanı'],
   receiptExpenses: ['Gider ID','Tarih','Gider Adı','Gider Türü','Tutar','Ödeme Şekli','Hesap ID','Hesap Adı','Açıklama','Oluşturma Zamanı'],
-  studentPlans: ['Plan ID','Tahakkuk ID','Toplam Bedel','Peşinat','Taksit Sayısı','İlk Taksit Tarihi','Aylık Taksit','Oluşturma Zamanı','Güncelleme Zamanı'],
+  studentPlans: ['Plan ID','Tahakkuk ID','Toplam Bedel','Peşinat','Taksit Sayısı','İlk Taksit Tarihi','Aylık Taksit','Oluşturma Zamanı','Güncelleme Zamanı','Taksit Planı'],
   accountingImports: ['Muhasebe Kayıt No','İşlem Türü','Sistem Kayıt No','Tarih','Tutar','Aktaran','Aktarım Zamanı'],
   userPreferences: ['Kullanıcı ID','Tercih Anahtarı','Değer','Güncelleme Zamanı'],
   audit: ['Zaman','Kullanıcı','İşlem','Kayıt Türü','Kayıt ID','Detay']
@@ -367,6 +367,11 @@ function login(email, pin) {
 function logout(token) {
   CacheService.getScriptCache().remove('session:' + token);
   return true;
+}
+
+function touchSession(token) {
+  requireSession_(token);
+  return {ok:true};
 }
 
 function getAppData(token, filters, forceRefresh) {
@@ -921,14 +926,39 @@ function studentPlanInput_(payload, total, accrualDate) {
   const downPayment = nonNegativeNumber_(payload.downPayment, 'Peşinat');
   if (downPayment > total) throw new Error('Peşinat toplam bedelden büyük olamaz.');
   const firstInstallmentDate = parseDate_(payload.firstInstallmentDate, 'İlk taksit tarihi');
-  const installmentCount = 8;
-  const monthlyInstallment = Math.round(((total - downPayment) / installmentCount) * 100) / 100;
+  const installmentCount = Math.trunc(Number(payload.installmentCount) || 8);
+  if (installmentCount < 1 || installmentCount > 10) throw new Error('Taksit sayısı 1 ile 10 arasında olmalıdır.');
+  const installmentTotal = Math.max(0, Math.round((total - downPayment) * 100) / 100);
+  const supplied = Array.isArray(payload.installments) ? payload.installments : [];
+  let installments = [];
+  if (supplied.length) {
+    if (supplied.length !== installmentCount) throw new Error('Taksit planındaki satır sayısı, seçilen taksit sayısıyla uyuşmuyor.');
+    let previousDate = null;
+    installments = supplied.map(function(item, index) {
+      item = item || {};
+      const dueDate = parseDate_(item.dueDate, (index + 1) + '. taksit tarihi');
+      const amount = nonNegativeNumber_(item.amount, (index + 1) + '. taksit tutarı');
+      if (previousDate && dueDate < previousDate) throw new Error('Taksit tarihleri sıralı olmalıdır.');
+      previousDate = dueDate;
+      return { dueDate:dueDate, amount:Math.round(amount * 100) / 100 };
+    });
+    const planned = Math.round(installments.reduce(function(sum, item) { return sum + item.amount; }, 0) * 100) / 100;
+    if (Math.abs(planned - installmentTotal) > 0.01) throw new Error('Taksit toplamı, peşinattan sonra kalan ' + moneyText_(installmentTotal) + ' ile eşleşmelidir.');
+  } else {
+    const base = Math.floor((installmentTotal / installmentCount) * 100) / 100;
+    installments = Array.from({length:installmentCount}, function(_, index) {
+      const amount = index === installmentCount - 1 ? Math.round((installmentTotal - base * (installmentCount - 1)) * 100) / 100 : base;
+      return { dueDate:addMonthsClamped_(firstInstallmentDate, index), amount:amount };
+    });
+  }
+  const monthlyInstallment = Math.round((installmentTotal / installmentCount) * 100) / 100;
   return {
     total:total,
     downPayment:downPayment,
     installmentCount:installmentCount,
     firstInstallmentDate:firstInstallmentDate,
     monthlyInstallment:monthlyInstallment,
+    installments:installments,
     accrualDate:accrualDate
   };
 }
@@ -936,18 +966,23 @@ function studentPlanInput_(payload, total, accrualDate) {
 function upsertStudentPlan_(ss, pledgeId, plan) {
   const sheet = ss.getSheetByName(APP.sheets.studentPlans);
   if (!sheet) throw new Error('Öğrenci ödeme planı sayfası bulunamadı. Önce upgradeSystem işlevini çalıştırın.');
+  if (sheet.getLastColumn() < HEADERS.studentPlans.length) {
+    sheet.getRange(1, HEADERS.studentPlans.length).setValue('Taksit Planı').setFontWeight('bold').setFontColor('#ffffff').setBackground('#163A5F');
+  }
   const existing = findRowBy_(APP.sheets.studentPlans, 2, pledgeId);
   const now = new Date();
+  const scheduleJson = JSON.stringify(plan.installments.map(function(item) { return { dueDate:isoDate_(item.dueDate), amount:item.amount }; }));
   if (existing) {
     sheet.getRange(existing.row, 3, 1, 7).setValues([[
       plan.total, plan.downPayment, plan.installmentCount, plan.firstInstallmentDate,
       plan.monthlyInstallment, existing.values[7] || now, now
     ]]);
+    sheet.getRange(existing.row, 10).setValue(scheduleJson);
     return;
   }
   appendRows_(sheet, [[
     makeId_('OPL'), pledgeId, plan.total, plan.downPayment, plan.installmentCount,
-    plan.firstInstallmentDate, plan.monthlyInstallment, now, now
+    plan.firstInstallmentDate, plan.monthlyInstallment, now, now, scheduleJson
   ]], HEADERS.studentPlans.length);
 }
 
@@ -3099,15 +3134,28 @@ function studentPaymentPlanDto_(pledgeRow, planRow, paymentRows) {
   const paid = (paymentRows || []).reduce(function(s, r) { return s + (Number(r[7]) || 0); }, 0);
   if (!planRow) return { configured:false, total:total, paid:paid, remaining:Math.max(0, total - paid), overdueAmount:0, schedule:[] };
   const downPayment = Math.max(0, Number(planRow[3]) || 0);
-  const count = Math.max(1, Number(planRow[4]) || 8);
-  const firstDate = planRow[5] instanceof Date ? planRow[5] : new Date(planRow[5]);
+  const count = Math.min(10, Math.max(1, Number(planRow[4]) || 8));
+  let firstDate = planRow[5] instanceof Date ? planRow[5] : new Date(planRow[5]);
   const installmentTotal = Math.max(0, total - downPayment);
-  const baseInstallment = Math.round((Number(planRow[6]) || installmentTotal / count) * 100) / 100;
+  const baseInstallment = Math.round((installmentTotal / count) * 100) / 100;
   const accrualDate = pledgeRow[11] instanceof Date ? pledgeRow[11] : new Date(pledgeRow[11]);
   const raw = [{ label:'Peşinat', dueDate:accrualDate, amount:downPayment }];
+  let storedSchedule = [];
+  try {
+    const parsed = typeof planRow[9] === 'string' ? JSON.parse(planRow[9]) : planRow[9];
+    if (Array.isArray(parsed) && parsed.length === count) {
+      storedSchedule = parsed.map(function(item) {
+        return { dueDate:parseDate_(item && item.dueDate, 'Taksit tarihi'), amount:nonNegativeNumber_(item && item.amount, 'Taksit tutarı') };
+      });
+      const storedTotal = Math.round(storedSchedule.reduce(function(sum, item) { return sum + item.amount; }, 0) * 100) / 100;
+      if (Math.abs(storedTotal - installmentTotal) > 0.01) storedSchedule = [];
+    }
+  } catch (e) { storedSchedule = []; }
+  if (storedSchedule.length) firstDate = storedSchedule[0].dueDate;
   for (let i = 0; i < count; i++) {
-    const amount = i === count - 1 ? Math.max(0, Math.round((installmentTotal - baseInstallment * (count - 1)) * 100) / 100) : baseInstallment;
-    raw.push({ label:(i + 1) + '. Taksit', dueDate:addMonthsClamped_(firstDate, i), amount:amount });
+    const fallbackAmount = i === count - 1 ? Math.max(0, Math.round((installmentTotal - baseInstallment * (count - 1)) * 100) / 100) : baseInstallment;
+    const stored = storedSchedule[i];
+    raw.push({ label:(i + 1) + '. Taksit', dueDate:stored ? stored.dueDate : addMonthsClamped_(firstDate, i), amount:stored ? stored.amount : fallbackAmount });
   }
   let allocatable = paid;
   const today = new Date(); today.setHours(23, 59, 59, 999);
@@ -3772,7 +3820,7 @@ function makeId_(prefix){ return prefix+'-'+Utilities.formatDate(new Date(),'Eur
     return originalRestorePledgeBackup(token, payload);
   };
 
-  const api = { approveCollection, bulkImportAccounting, bulkImportDonations, bulkSavePledges, bulkUpdateCollections, convertPledgesToStudentAccruals, copyReferenceTargetsMonth, copyStaffCommitmentsMonth, copyTeacherAccrualsMonth, deleteAllDonations, deleteAllPledges, deleteCollection, deleteCurrentExpense, deleteCurrentExpensePayment, deleteExpensePayment, deleteLoan, deleteLoanRepayment, deletePledge, deleteReceiptExpense, deleteReferenceTarget, deleteStaffAccrual, deleteTeacherAccrual, generateFullDataBackup, generateMonthlyStaffCommitments, generateMonthlyTeacherAccruals, generatePersonnelPledgePdf, generateReferenceTargetsPdf, generateTeacherPaymentReceiptPdf, getAppData, login, logout, reconcileSystem, rejectCollection, reopenCollectionApproval, restorePledgeBackup, saveBulkCollections, saveBulkExpensePayments, saveBulkReferenceTargets, saveCashAccount, saveCollection, saveCollectionColumnPreferences, saveCurrentExpense, saveCurrentExpensePayment, saveExpenseCommitment, saveExpensePayment, saveLoan, saveLoanRepayment, savePledge, savePledgeColumnPreferences, saveQuickDonation, saveReceiptExpense, saveReferenceTarget, saveStaffPlanSet, saveStudentAccrual, saveTeacherPlan, saveUser, setCashAccountActive, setPledgeReceivableStatus, setReferenceTargetActive, setStaffPlanActive, setTeacherPlanActive, setUserActive, updateCashAccount, updateCollection, updateCurrentExpense, updateCurrentExpensePayment, updateExpensePayment, updateLoan, updateLoanRepayment, updatePledge, updateReceiptExpense, updateReferenceTarget, updateStaffAccrual, updateStaffPlan, updateStudentAccrual, updateTeacherAccrual, updateTeacherPlan, updateUser };
+  const api = { approveCollection, bulkImportAccounting, bulkImportDonations, bulkSavePledges, bulkUpdateCollections, convertPledgesToStudentAccruals, copyReferenceTargetsMonth, copyStaffCommitmentsMonth, copyTeacherAccrualsMonth, deleteAllDonations, deleteAllPledges, deleteCollection, deleteCurrentExpense, deleteCurrentExpensePayment, deleteExpensePayment, deleteLoan, deleteLoanRepayment, deletePledge, deleteReceiptExpense, deleteReferenceTarget, deleteStaffAccrual, deleteTeacherAccrual, generateFullDataBackup, generateMonthlyStaffCommitments, generateMonthlyTeacherAccruals, generatePersonnelPledgePdf, generateReferenceTargetsPdf, generateTeacherPaymentReceiptPdf, getAppData, login, logout, reconcileSystem, rejectCollection, reopenCollectionApproval, restorePledgeBackup, saveBulkCollections, saveBulkExpensePayments, saveBulkReferenceTargets, saveCashAccount, saveCollection, saveCollectionColumnPreferences, saveCurrentExpense, saveCurrentExpensePayment, saveExpenseCommitment, saveExpensePayment, saveLoan, saveLoanRepayment, savePledge, savePledgeColumnPreferences, saveQuickDonation, saveReceiptExpense, saveReferenceTarget, saveStaffPlanSet, saveStudentAccrual, saveTeacherPlan, saveUser, setCashAccountActive, setPledgeReceivableStatus, setReferenceTargetActive, setStaffPlanActive, setTeacherPlanActive, setUserActive, touchSession, updateCashAccount, updateCollection, updateCurrentExpense, updateCurrentExpensePayment, updateExpensePayment, updateLoan, updateLoanRepayment, updatePledge, updateReceiptExpense, updateReferenceTarget, updateStaffAccrual, updateStaffPlan, updateStudentAccrual, updateTeacherAccrual, updateTeacherPlan, updateUser };
   const googleMethods = new Set(["generatePersonnelPledgePdf","generateReferenceTargetsPdf","generateTeacherPaymentReceiptPdf"]);
   return {
     googleMethods,
