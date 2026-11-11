@@ -1,70 +1,1035 @@
-const APP_URL='https://script.google.com/macros/s/AKfycbzODsdn99mhtCfgIuWqnwpqHqFYHv3sP0W1XlZ7JCnOgrkvT8by43Tjz1UDxTA4G9En/exec';
-const VALID_VIEWS=['dashboard','pledges','collections','references','approvals','cash','students','accounting','expenses','debts','staff','teacher','users'];
-const requestedView=new URLSearchParams(location.search).get('view');
-const initialView=VALID_VIEWS.includes(requestedView)?requestedView:'dashboard';
-const FRAME_URL=`${APP_URL}?v=55#${initialView}`;
-const frame=document.querySelector('#appFrame');
-const loadingView=document.querySelector('#loadingView');
-const offlineView=document.querySelector('#offlineView');
-const connectionStatus=document.querySelector('#connectionStatus');
-const installButton=document.querySelector('#installButton');
-let installPrompt=null;
-let sharedSessionToken='';
-const waitingSessionFrames=[];
-const sessionChannel='BroadcastChannel' in window?new BroadcastChannel('tahsilat-session-v1'):null;
-frame.src=FRAME_URL;
+const state={token:'',data:null,view:'dashboard',pages:{},approvalTab:'all',pledgeTab:'active',pledgeSearch:'',selectedPledgeId:'',pledgeSort:'amount-desc',pledgeFilters:{year:'',activity:'',subActivity:'',type:'',reference:'',group:''},pledgeHiddenColumns:[],collectionTab:'collections',collectionHiddenColumns:[],collectionFilters:{collections:{},donations:{}},collectionBulkEdit:{active:false,saving:false,drafts:{}},studentTab:'accruals',studentSearch:'',referenceSource:'collections',referenceTab:'analysis',targetSort:'collection-rate',targetPeriod:null,debtTab:'loans',generalExpenseTab:'current',expenseTab:{staff:'commitments',teacher:'commitments'},staffAccrualSearch:'',staffAccrualFilters:{id:'',period:'',type:'',status:'',minTotal:'',minPaid:'',minRemaining:'',sort:'total-desc'},staffSummaryScope:[],staffPaymentFilters:{name:'',period:'',type:'',method:'',account:''},staffPaymentDrill:{person:'',month:''}};
+const PAGE_SIZE=100;
+const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
+const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
+const PWA_BUILD='56';
+const SUPABASE_API='https://yrhirwtwokzmixfbjlde.supabase.co/functions/v1/tahsilat-api';
+let deferredInstallPrompt=null;
+let backgroundOperationCount=0;
+let dataSyncRequested=0;
+let dataSyncProcessed=0;
+let dataSyncRunning=false;
+let sharedSessionRecoveryRunning=false;
+const $=s=>document.querySelector(s); const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+const money=v=>new Intl.NumberFormat('tr-TR',{style:'currency',currency:'TRY'}).format(Number(v)||0); const date=v=>v?new Intl.DateTimeFormat('tr-TR').format(new Date(v+'T12:00:00')):'—';
+async function server(name,...args){
+  const response=await fetch(SUPABASE_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({method:name,args:args,requestId:crypto.randomUUID()})});
+  const result=await response.json().catch(()=>null);
+  if(!response.ok||!result?.ok)throw new Error(result?.error?.message||'Sunucu işlemi tamamlanamadı.');
+  return result.data;
+}
+async function loadAppData(filters={},forceRefresh=false){
+  const data=await server('getAppData',state.token,filters,forceRefresh===true);
+  if(!data||!data.user||!data.filters||!data.summary)throw new Error('Uygulama verisi geçersiz.');
+  return data;
+}
+function toast(msg,error=false){const el=$('#toast');el.textContent=msg;el.className='toast show'+(error?' error':'');clearTimeout(toast.t);toast.t=setTimeout(()=>el.className='toast',3000)}
+function acceptAppData(data){state.data=data;state.pledgeHiddenColumns=Array.isArray(data?.preferences?.pledgeHiddenColumns)?data.preferences.pledgeHiddenColumns.slice():[];state.collectionHiddenColumns=Array.isArray(data?.preferences?.collectionHiddenColumns)?data.preferences.collectionHiddenColumns.slice():[];updateSyncStatus()}
+function updateSyncStatus(){const el=$('#syncStatus');if(!el||!state.data)return;const meta=state.data._meta||{};const cached=meta.source==='server-cache';el.classList.toggle('cached',cached);const label=el.querySelector('strong');if(label)label.textContent=cached?'Hızlı önbellek':'Canlı veri';el.title=meta.generatedAt?`Son veri hazırlama: ${new Date(meta.generatedAt).toLocaleString('tr-TR')}`:'Veriler güncel';}
+function showSyncingStatus(){const el=$('#syncStatus');if(!el)return;el.classList.add('syncing');el.classList.remove('cached');const label=el.querySelector('strong');if(label)label.textContent='Veriler eşitleniyor';}
+function isApprover(){return ['YÖNETİCİ','MUHASEBE SORUMLUSU'].includes(state.data?.user?.role)}
+function roleLabel(role){return role==='YÖNETİCİ'?'Yönetici':role==='MUHASEBE SORUMLUSU'?'Muhasebe sorumlusu':'Tahsilat kullanıcısı'}
+function updateProfile(){if(!state.data?.user)return;$('#profileName').textContent=state.data.user.name;$('#profileRole').textContent=roleLabel(state.data.user.role)}
+function scheduleDataSync(){dataSyncRequested++;showSyncingStatus();if(dataSyncRunning)return;dataSyncRunning=true;(async()=>{while(dataSyncProcessed<dataSyncRequested){const ticket=dataSyncRequested;const filters=currentFilters();const filterKey=JSON.stringify(filters);try{const fresh=await loadAppData(filters,false);if(ticket===dataSyncRequested&&filterKey===JSON.stringify(currentFilters())){acceptAppData(fresh);updateProfile();render()}}catch(e){toast('Veri eşitleme: '+e.message,true)}dataSyncProcessed=ticket}dataSyncRunning=false;$('#syncStatus')?.classList.remove('syncing');updateSyncStatus()})()}
+function setBusy(b=true){backgroundOperationCount=Math.max(0,backgroundOperationCount+(b?1:-1));const busy=backgroundOperationCount>0;document.body.classList.toggle('operation-running',busy);const status=$('#backgroundStatus');if(status){status.classList.toggle('hidden',!busy);const label=status.querySelector('strong');if(label)label.textContent=backgroundOperationCount>1?`${backgroundOperationCount} işlem arka planda sürüyor`:'İşlem arka planda sürüyor';}const loginButton=$('#loginForm button[type="submit"]');if(loginButton)loginButton.disabled=busy;const apply=$('#applyFilter');if(apply)apply.disabled=busy;const logout=$('#logoutBtn');if(logout)logout.disabled=busy;document.querySelectorAll('#modal .btn.primary').forEach(x=>x.disabled=busy);if(b){const modal=$('#modal');setTimeout(()=>{if(modal&&modal.open)modal.close()},0)}}
+function statusClass(s){return /Kapandı|Ödendi|Aktif|ONAYLANDI/.test(s)?'green':/Kısmi|BEKLİYOR/.test(s)?'amber':'red'}
 
-function trustedAppOrigin(origin){return origin==='https://script.google.com'||/^https:\/\/[a-z0-9-]+-script\.googleusercontent\.com$/i.test(origin)}
-function validSessionToken(token){return typeof token==='string'&&token.length>=12&&token.length<=500}
-function sendSessionToken(target,origin){if(sharedSessionToken&&target)target.postMessage({type:'TAHSILAT_SESSION_TOKEN',token:sharedSessionToken},origin)}
-function flushWaitingFrames(){while(waitingSessionFrames.length){const item=waitingSessionFrames.shift();sendSessionToken(item.source,item.origin)}}
-window.addEventListener('message',event=>{
-  const data=event.data||{};
-  if(!trustedAppOrigin(event.origin))return;
-  if(data.type==='TAHSILAT_SESSION_STORE'&&validSessionToken(data.token)){
-    sharedSessionToken=data.token;flushWaitingFrames();sessionChannel?.postMessage({type:'TOKEN',token:data.token});return;
-  }
-  if(data.type==='TAHSILAT_SESSION_REQUEST'){
-    if(sharedSessionToken)sendSessionToken(event.source,event.origin);
-    else{waitingSessionFrames.push({source:event.source,origin:event.origin});sessionChannel?.postMessage({type:'REQUEST'});}
-    return;
-  }
-  if(data.type==='TAHSILAT_SESSION_CLEAR'){
-    sharedSessionToken='';waitingSessionFrames.length=0;sessionChannel?.postMessage({type:'CLEAR'});
-  }
-});
-if(sessionChannel)sessionChannel.onmessage=event=>{
-  const data=event.data||{};
-  if(data.type==='REQUEST'&&sharedSessionToken)sessionChannel.postMessage({type:'TOKEN',token:sharedSessionToken});
-  else if(data.type==='TOKEN'&&validSessionToken(data.token)){sharedSessionToken=data.token;flushWaitingFrames();}
-  else if(data.type==='CLEAR'){sharedSessionToken='';waitingSessionFrames.length=0;}
-};
+function messagePwa(type,extra={}){if(window.top===window)return;window.top.postMessage(Object.assign({type:type},extra),PWA_PARENT_ORIGIN)}
+function shareSessionWithPwa(){if(state.token)messagePwa('TAHSILAT_SESSION_STORE',{token:state.token})}
+function requestSessionFromPwa(){messagePwa('TAHSILAT_SESSION_REQUEST')}
+async function restoreSharedSession(token){if(state.data||sharedSessionRecoveryRunning||typeof token!=='string'||token.length<12||token.length>500)return;sharedSessionRecoveryRunning=true;try{state.token=token;localStorage.setItem('tahsilat_token',token);acceptAppData(await loadAppData({},false));openApp()}catch(e){state.token='';localStorage.removeItem('tahsilat_token');messagePwa('TAHSILAT_SESSION_CLEAR');toast(e.message||'Oturum yüklenemedi.',true)}finally{sharedSessionRecoveryRunning=false}}
+window.addEventListener('message',event=>{if(event.origin!==PWA_PARENT_ORIGIN||event.source!==window.top||!event.data)return;if(event.data.type==='TAHSILAT_SESSION_TOKEN')restoreSharedSession(event.data.token)});
+$('#loginForm').addEventListener('submit',async e=>{e.preventDefault();setBusy(true);try{const r=await server('login',$('#loginEmail').value,$('#loginPin').value);if(!r||typeof r.token!=='string'||r.token.length<12)throw new Error('Oturum oluşturulamadı. Lütfen tekrar deneyin.');state.token=r.token;localStorage.setItem('tahsilat_token',state.token);acceptAppData(await loadAppData({},false));openApp()}catch(err){state.token='';state.data=null;localStorage.removeItem('tahsilat_token');$('#appView').classList.add('hidden');$('#loginView').classList.remove('hidden');toast(err.message||'Giriş işlemi tamamlanamadı.',true)}finally{setBusy(false)}});
+$('#logoutBtn').onclick=async()=>{messagePwa('TAHSILAT_SESSION_CLEAR');try{await server('logout',state.token)}catch(e){} localStorage.removeItem('tahsilat_token');location.reload()};
+$('#menuBtn').onclick=()=>document.querySelector('.sidebar').classList.toggle('open');
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();deferredInstallPrompt=e});
+$('#installBtn').onclick=async()=>{if(deferredInstallPrompt){deferredInstallPrompt.prompt();await deferredInstallPrompt.userChoice;deferredInstallPrompt=null;return;}showModal('Telefona ekle',`<div class="install-help"><p><strong>Android / Chrome:</strong> Tarayıcı menüsünü açın ve “Ana ekrana ekle” veya “Uygulamayı yükle” seçeneğine dokunun.</p><p><strong>iPhone / Safari:</strong> Paylaş düğmesine dokunun, ardından “Ana Ekrana Ekle” seçeneğini seçin.</p><p>Eklenen simgeden açtığınızda sistem telefon ekranına uygun çalışır. Veriler güvenlik nedeniyle çevrimdışı saklanmaz; internet bağlantısı gerekir.</p></div>`)};
+$('#applyFilter').onclick=()=>refresh({start:$('#startDate').value,end:$('#endDate').value,applyToLists:$('#filterLists').checked});
 
-function showOnlineState(){
-  const online=navigator.onLine;
-  connectionStatus.textContent=online?'Çevrimiçi':'Çevrimdışı';
-  connectionStatus.className='connection '+(online?'online':'offline');
-  offlineView.hidden=online;
-  if(!online){loadingView.hidden=true;frame.hidden=true;return;}
-  if(!frame.src)frame.src=FRAME_URL;
-  if(frame.dataset.loaded==='true'){frame.hidden=false;loadingView.hidden=true}else{loadingView.hidden=false;frame.hidden=true}
+async function boot(){const saved=localStorage.getItem('tahsilat_token');if(!saved){requestSessionFromPwa();return}try{state.token=saved;acceptAppData(await loadAppData({},false));openApp()}catch(e){localStorage.removeItem('tahsilat_token');state.token='';state.data=null;$('#appView').classList.add('hidden');$('#loginView').classList.remove('hidden');toast(e.message||'Oturum verileri yüklenemedi.',true);requestSessionFromPwa()}}
+function requestedView(){const candidate=String(location.hash||'').replace(/^#/,'');return ['dashboard','pledges','collections','references','approvals','cash','students','accounting','expenses','debts','staff','teacher','users'].includes(candidate)?candidate:'dashboard'}
+function navigateToView(view,updateHash=true){state.view=view||'dashboard';if(updateHash&&location.hash!==`#${state.view}`)history.pushState(null,'',`#${state.view}`);document.querySelector('.sidebar')?.classList.remove('open');buildNav();render()}
+function openApp(){ $('#loginView').classList.add('hidden');$('#appView').classList.remove('hidden');$('#profileName').textContent=state.data.user.name;$('#profileRole').textContent=roleLabel(state.data.user.role);$('#startDate').value=state.data.filters.start;$('#endDate').value=state.data.filters.end;$('#filterLists').checked=Boolean(state.data.filters.applyToLists);state.view=requestedView();updateSyncStatus();buildNav();render();shareSessionWithPwa() }
+function pwaViewUrl(view){return `${PWA_ENTRY_URL}#${encodeURIComponent(view||'dashboard')}`}
+function buildNav(){const admin=state.data.user.role==='YÖNETİCİ';const approver=isApprover();const items=[['dashboard','Genel görünüm'],['pledges','Taahhütler'],['collections','Tahsilatlar'],['references','Teberru / Tahsilat']];if(approver)items.push(['approvals','Onay Bekleyenler'],['cash','Kasa / Banka']);if(admin)items.push(['students','Öğrenci ödemeleri'],['accounting','Muhasebe aktarımı'],['expenses','Giderler'],['debts','Borçlar'],['staff','Personel ödemeleri'],['teacher','Öğretmen ödemeleri'],['users','Kullanıcılar']);const icons={dashboard:'M4 13h6V4H4v9Zm10 7h6V11h-6v9ZM4 20h6v-3H4v3Zm10-13h6V4h-6v3Z',pledges:'M6 3h9l4 4v14H6V3Zm9 0v5h4M9 12h7M9 16h7',collections:'M12 3v12m-5-5 5 5 5-5M5 21h14',references:'M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm8-1 2 2 4-5',approvals:'M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Zm-4-10 3 3 5-6',cash:'M4 6h14a2 2 0 0 1 2 2v10H4V6Zm0 0 11-3v3m1 6h4',students:'M3 9l9-5 9 5-9 5-9-5Zm4 3v5c3 2 7 2 10 0v-5',accounting:'M7 7h11l-3-3m3 3-3 3M17 17H6l3 3m-3-3 3-3',expenses:'M4 4h16v16H4V4Zm4 5h8M8 13h5M8 17h3',debts:'M4 18 10 12l4 4 6-9M15 7h5v5',staff:'M4 7h16v12H4V7Zm5 0V4h6v3m-3 4v4',teacher:'M4 5h7a3 3 0 0 1 3 3v11a3 3 0 0 0-3-3H4V5Zm16 0h-3a3 3 0 0 0-3 3v11a3 3 0 0 1 3-3h3V5',users:'M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2M8.5 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8Zm10-1v6m3-3h-6'};$('#nav').innerHTML=items.map(([id,label])=>`<a class="nav-btn ${state.view===id?'active':''}" data-view="${id}" href="${pwaViewUrl(id)}"><span class="nav-icon" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="${icons[id]}"></path></svg></span><span>${label}</span></a>`).join('');document.querySelectorAll('.nav-btn').forEach(b=>b.onclick=e=>{if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;e.preventDefault();navigateToView(b.dataset.view)})}
+$('#homeBrand').href=pwaViewUrl('dashboard');
+$('#homeBrand').onclick=e=>{if(e.button!==0||e.ctrlKey||e.metaKey||e.shiftKey||e.altKey)return;e.preventDefault();navigateToView('dashboard')};
+window.addEventListener('hashchange',()=>{if(state.data&&requestedView()!==state.view)navigateToView(requestedView(),false)});
+async function refresh(filters){setBusy(true);try{acceptAppData(await loadAppData(filters||{start:$('#startDate').value,end:$('#endDate').value,applyToLists:$('#filterLists').checked},true));$('#startDate').value=state.data.filters.start;$('#endDate').value=state.data.filters.end;$('#filterLists').checked=Boolean(state.data.filters.applyToLists);render();toast('Veriler veritabanından yenilendi.')}catch(e){toast(e.message,true)}finally{setBusy(false)}}
+function currentFilters(){return {start:$('#startDate').value,end:$('#endDate').value,applyToLists:$('#filterLists').checked}}
+async function reloadCurrentFilters(){acceptAppData(await loadAppData(currentFilters(),false))}
+function heading(title,hint){$('#pageTitle').textContent=title;$('#pageHint').textContent=hint||''}
+function render(){const views={dashboard:renderDashboard,pledges:renderPledges,collections:renderCollections,references:renderReferences,approvals:renderApprovals,students:renderStudents,accounting:renderAccounting,cash:renderCash,expenses:renderGeneralExpenses,debts:renderDebts,staff:()=>renderExpense('staff'),teacher:()=>renderExpense('teacher'),users:renderUsers};(views[state.view]||renderDashboard)()}
+function cards(items){return `<div class="cards">${items.map(x=>{const action=x[2]||'';return `<article class="card ${action?'clickable-card':''}" ${action?`onclick="${action}" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();${action}}"`:''}><span>${esc(x[0])}</span><strong>${x[1]}</strong>${action?'<em>Detayı görmek için tıklayın</em>':''}</article>`}).join('')}</div>`}
+function panel(title,body,action='',hint=''){return `<section class="panel"><div class="panel-head"><div><h3>${esc(title)}</h3>${hint?`<p>${esc(hint)}</p>`:''}</div>${action}</div>${body}</section>`}
+function table(headers,rows,empty='Henüz kayıt yok.'){return `<div class="table-wrap"><table class="data-table"><thead><tr>${headers.map(h=>`<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.length?rows.join(''):`<tr><td colspan="${headers.length}" class="empty">${esc(empty)}</td></tr>`}</tbody></table></div>`}
+function pageData(key,items){const pages=Math.max(1,Math.ceil(items.length/PAGE_SIZE));const current=Math.min(pages,Math.max(1,Number(state.pages[key])||1));state.pages[key]=current;const start=(current-1)*PAGE_SIZE;const controls=items.length>PAGE_SIZE?`<div class="pagination"><span>${items.length} kayıt · ${current}/${pages}. sayfa</span><div><button class="btn tiny" ${current<=1?'disabled':''} onclick="setPage('${key}',${current-1})">Önceki</button><button class="btn tiny" ${current>=pages?'disabled':''} onclick="setPage('${key}',${current+1})">Sonraki</button></div></div>`:`<div class="pagination single"><span>${items.length} kayıt</span></div>`;return {items:items.slice(start,start+PAGE_SIZE),controls:controls}}
+function setPage(key,page){state.pages[key]=page;render()}
+function resetPage(key){state.pages[key]=1}
+
+function analysisBars(items){const analysis=[...(items||[])].sort((a,b)=>(Number(b.period)||0)-(Number(a.period)||0));const total=analysis.reduce((sum,x)=>sum+(Number(x.period)||0),0);const max=Math.max(1,...analysis.map(x=>Number(x.period)||0));return analysis.map(x=>{const amount=Number(x.period)||0;const pct=total?amount/total*100:0;return `<div class="bar-row"><strong>${esc(x.name)}</strong><div class="bar-track" title="%${pct.toFixed(1)}"><div class="bar-fill" style="width:${Math.round(amount/max*100)}%"></div></div><span class="money bar-value">${money(amount)} · %${pct.toFixed(1)}</span></div>`}).join('')||'<div class="empty">Veri yok.</div>'}
+function renderDashboard(){heading('Genel görünüm','Seçilen tarih aralığındaki onaylanmış tahsilatlar ve güncel bakiye');const s=state.data.summary;const subActivityBars=analysisBars(state.data.donationAnalysis);const activityBars=analysisBars(state.data.activityAnalysis);const recent=state.data.collections.filter(x=>x.approvalStatus==='ONAYLANDI').slice(0,7).map(x=>`<tr><td>${date(x.date)}</td><td>${esc(x.fullName)}</td><td>${esc(x.donationType)}</td><td>${esc(x.reference)}</td><td class="money">${money(x.amount)}</td></tr>`);const exportAction=state.data.user.role==='YÖNETİCİ'?'<div class="actions page-actions"><button class="btn secondary" onclick="downloadAllDataExcel()">Tüm verileri Excel\'e aktar</button></div>':'';$('#content').innerHTML=exportAction+cards([['Toplam taahhüt',money(s.totalPledge)],['Toplam tahsilat',money(s.totalCollected)],['Kalan bakiye',money(s.totalRemaining)],['Dönem tahsilatı',money(s.periodCollected)]])+`<div class="grid-2">${panel('Alt faaliyetlere göre dönem tahsilatı',`<div class="bar-list">${subActivityBars}</div>`,'','Alt faaliyet bazında tutar ve dönem yüzdesi büyükten küçüğe sıralanır.')}${panel('Faaliyet türüne göre dönem tahsilatı',`<div class="bar-list">${activityBars}</div>`,'','Faaliyet bazında tutar ve dönem yüzdesi büyükten küçüğe sıralanır.')}</div>${panel('Son onaylanan tahsilatlar',table(['Tarih','Bağışçı','Tür','Referans','Tutar'],recent))}`}
+function pledgeColumnDefinitions(){return [
+  {key:'select',label:'SEÇ',cell:x=>`<input type="radio" name="pledgeSelection" ${x.id===state.selectedPledgeId?'checked':''} aria-label="Kaydı seç">`},
+  {key:'year',label:'YIL',cell:x=>esc(x.year)},
+  {key:'activity',label:'FAALİYET',cell:x=>esc(x.activity||'')},
+  {key:'subActivity',label:'ALT FAALİYET',cell:x=>esc(x.subActivity||'')},
+  {key:'fullName',label:'HESAP ADI',cell:x=>esc(x.fullName)},
+  {key:'payer',label:'KİMİN ADINA',cell:x=>esc(x.payer||'')},
+  {key:'phone',label:'İLETİŞİM TEL',cell:x=>esc(x.phone||'')},
+  {key:'reference',label:'REFERANS',cell:x=>esc(x.reference)},
+  {key:'donationType',label:'REFERANS NEVİ',cell:x=>esc(x.donationType)},
+  {key:'group',label:'TAKİP EDEN',cell:x=>esc(x.group||'')},
+  {key:'amount',label:'TAHAKKUK (TL)',className:'money',cell:x=>money(x.amount)},
+  {key:'paid',label:'ÖDENEN (TL)',className:'money',cell:x=>money(x.paid)},
+  {key:'remaining',label:'KALAN (TL)',className:'money',cell:x=>money(x.remaining)},
+  {key:'notes',label:'NOTLAR',cell:x=>esc(x.notes||'')}
+]}
+function pledgeColumnsModal(){const hidden=new Set(state.pledgeHiddenColumns||[]);const fields=`<div class="wide pledge-column-chooser"><p>Tabloda görmek istediğiniz sütunları seçin. Seçiminiz kullanıcı hesabınızda saklanır ve giriş yaptığınız diğer cihazlarda da uygulanır.</p><div class="pledge-column-tools"><button class="btn tiny secondary" type="button" onclick="setAllPledgeColumnCheckboxes(true)">Tümünü göster</button><button class="btn tiny" type="button" onclick="setAllPledgeColumnCheckboxes(false)">Tümünü temizle</button></div><div class="pledge-column-grid">${pledgeColumnDefinitions().map(c=>`<label class="pledge-column-item"><input type="checkbox" data-pledge-column="${c.key}" ${hidden.has(c.key)?'':'checked'}><span>${esc(c.label)}</span></label>`).join('')}</div></div>`;showModal('Görünen taahhüt sütunları',formHtml(fields,'applyPledgeColumnVisibility()'))}
+function setAllPledgeColumnCheckboxes(checked){document.querySelectorAll('[data-pledge-column]').forEach(x=>x.checked=checked)}
+async function applyPledgeColumnVisibility(){const boxes=[...document.querySelectorAll('[data-pledge-column]')];const visible=boxes.filter(x=>x.checked).map(x=>x.dataset.pledgeColumn);if(!visible.length){toast('En az bir sütun görünür kalmalıdır.',true);return}const previous=(state.pledgeHiddenColumns||[]).slice();state.pledgeHiddenColumns=pledgeColumnDefinitions().map(x=>x.key).filter(key=>!visible.includes(key));$('#modal').close();renderPledges();try{await server('savePledgeColumnPreferences',state.token,state.pledgeHiddenColumns);toast('Sütun görünümü kullanıcı hesabınıza kaydedildi.')}catch(e){state.pledgeHiddenColumns=previous;renderPledges();toast(e.message,true)}}
+function renderPledges(){
+  heading('Bağış taahhütleri','Şablon indirme, toplu aktarım ve parçalı tahsilat takibi');
+  const admin=state.data.user.role==='YÖNETİCİ';
+  const doubtful=state.pledgeTab==='doubtful';
+  const query=normalizeSearch(state.pledgeSearch);
+  const text=v=>String(v==null?'':v);
+  const source=Array.isArray(state.data&&state.data.pledges)?state.data.pledges:[];
+  const allRecords=source.map(x=>Object.assign({},x,{activity:text(x.activity),subActivity:text(x.subActivity),accountCode:text(x.accountCode),fullName:text(x.fullName),payer:text(x.payer),phone:text(x.phone),reference:text(x.reference),donationType:text(x.donationType),group:text(x.group),notes:text(x.notes),receivableStatus:text(x.receivableStatus||'AKTİF').toUpperCase()})).filter(x=>(x.receivableStatus==='ŞÜPHELİ')===doubtful);
+  const f=Object.assign(emptyPledgeFilters(),state.pledgeFilters||{});state.pledgeFilters=f;
+  const years=[...new Set(allRecords.map(x=>String(x.year)).filter(Boolean))].sort((a,b)=>Number(b)-Number(a));
+  const sortText=(a,b)=>String(a).localeCompare(String(b),'tr');
+  const activities=[...new Set(allRecords.map(x=>x.activity).filter(Boolean))].sort(sortText);
+  const subActivities=[...new Set(allRecords.map(x=>x.subActivity).filter(Boolean))].sort(sortText);
+  const types=[...new Set(allRecords.map(x=>x.donationType).filter(Boolean))].sort(sortText);
+  const references=[...new Set(allRecords.map(x=>x.reference).filter(Boolean))].sort(sortText);
+  const groups=[...new Set(allRecords.map(x=>x.group).filter(Boolean))].sort(sortText);
+  let records=allRecords.filter(x=>(!query||normalizeSearch([x.year,x.activity,x.subActivity,x.fullName,x.payer,x.phone,x.reference,x.donationType,x.group,x.notes].join(' ')).includes(query))&&(!f.year||String(x.year)===f.year)&&(!f.activity||x.activity===f.activity)&&(!f.subActivity||x.subActivity===f.subActivity)&&(!f.type||x.donationType===f.type)&&(!f.reference||x.reference===f.reference)&&(!f.group||x.group===f.group));
+  const sorters={'amount-desc':(a,b)=>b.amount-a.amount,'remaining-desc':(a,b)=>b.remaining-a.remaining,'paid-desc':(a,b)=>b.paid-a.paid,'name-asc':(a,b)=>sortText(a.fullName,b.fullName),'name-desc':(a,b)=>sortText(b.fullName,a.fullName)};
+  records=records.slice().sort(sorters[state.pledgeSort]||sorters['amount-desc']);
+  const pageKey='pledges-'+state.pledgeTab;
+  const paged=pageData(pageKey,records);
+  const filteredTotals=records.reduce((sum,x)=>{sum.amount+=Number(x.amount)||0;sum.paid+=Number(x.paid)||0;sum.remaining+=Number(x.remaining)||0;return sum},{amount:0,paid:0,remaining:0});
+  const filteredSummary=`<div class="pledge-filter-summary"><div><span>Filtrelenen kayıt</span><strong>${records.length}</strong></div><div><span>Toplam bakiye</span><strong>${money(filteredTotals.amount)}</strong></div><div><span>Toplam ödenen</span><strong>${money(filteredTotals.paid)}</strong></div><div><span>Toplam kalan</span><strong>${money(filteredTotals.remaining)}</strong></div></div>`;
+  const selected=records.find(x=>x.id===state.selectedPledgeId)||null;
+  if(!selected)state.selectedPledgeId='';
+  const columnDefs=pledgeColumnDefinitions();
+  const hiddenColumns=new Set(state.pledgeHiddenColumns||[]);
+  let visibleColumns=columnDefs.filter(c=>!hiddenColumns.has(c.key));
+  if(!visibleColumns.length){state.pledgeHiddenColumns=[];visibleColumns=columnDefs.slice()}
+  const rows=paged.items.map(x=>`<tr class="selectable-row ${x.id===state.selectedPledgeId?'selected-row':''}" onclick="selectPledge('${esc(x.id)}')">${visibleColumns.map(c=>`<td${c.className?` class="${c.className}"`:''}>${c.cell(x)}</td>`).join('')}</tr>`);
+  const bulkActions=admin?`<button class="btn secondary" onclick="downloadPledgeTemplate()">Şablon indir</button><button class="btn secondary" onclick="bulkPledgeModal()">Toplu taahhüt ekle</button><button class="btn secondary" onclick="personnelPdfModal()">Personel PDF</button><button class="btn danger" onclick="removeAllPledges()">Tüm taahhütleri sil</button>`:'';
+  const headers=visibleColumns.map(c=>c.label);
+  const tabs=`<div class="tabs"><button class="tab ${!doubtful?'active':''}" onclick="setPledgeTab('active')">Aktif taahhütler</button><button class="tab ${doubtful?'active':''}" onclick="setPledgeTab('doubtful')">Şüpheli alacaklar</button></div>`;
+  const search=`<div class="pledge-search"><input id="pledgeSearchInput" type="search" value="${esc(state.pledgeSearch)}" placeholder="Tüm alanlarda ara" onkeydown="if(event.key==='Enter'){event.preventDefault();applyPledgeSearch()}"><button class="btn secondary" onclick="applyPledgeSearch()">Ara</button>${state.pledgeSearch?'<button class="btn" onclick="clearPledgeSearch()">Temizle</button>':''}<span>${query?records.length+' kayıt bulundu.':'Hesap adı, faaliyet, referans, referans nevi, takip eden veya notlarda arayabilirsiniz.'}</span></div>`;
+  const filterSelect=(label,id,items,current)=>`<label>${label}<select id="${id}" onchange="applyPledgeColumnFilters()"><option value="">Tümü</option>${items.map(v=>`<option value="${esc(v)}" ${String(v)===String(current)?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`;
+  const filters=`<div class="pledge-filters">${filterSelect('YIL','pledgeFilterYear',years,f.year)}${filterSelect('FAALİYET','pledgeFilterActivity',activities,f.activity)}${filterSelect('ALT FAALİYET','pledgeFilterSubActivity',subActivities,f.subActivity)}${filterSelect('REFERANS NEVİ','pledgeFilterType',types,f.type)}${filterSelect('REFERANS','pledgeFilterReference',references,f.reference)}${filterSelect('TAKİP EDEN','pledgeFilterGroup',groups,f.group)}<label>SIRALAMA<select id="pledgeSort" onchange="applyPledgeColumnFilters()"><option value="amount-desc" ${state.pledgeSort==='amount-desc'?'selected':''}>Tahakkuk: büyükten küçüğe</option><option value="remaining-desc" ${state.pledgeSort==='remaining-desc'?'selected':''}>Kalan: büyükten küçüğe</option><option value="paid-desc" ${state.pledgeSort==='paid-desc'?'selected':''}>Ödenen: büyükten küçüğe</option><option value="name-asc" ${state.pledgeSort==='name-asc'?'selected':''}>Hesap adı: A-Z</option><option value="name-desc" ${state.pledgeSort==='name-desc'?'selected':''}>Hesap adı: Z-A</option></select></label><button class="btn" onclick="clearPledgeColumnFilters()">Filtreleri temizle</button></div>`;
+  const selectedActions=selected?`<div class="selected-record-actions"><strong>Seçilen: ${esc(selected.fullName)} · ${esc(selected.donationType)} · Kalan ${money(selected.remaining)}</strong><div class="actions">${admin?`<button class="btn secondary" onclick="${selected.source==='ÖĞRENCİ'?'editStudentAccrualModal':'editPledgeModal'}('${esc(selected.id)}')">Düzenle</button><button class="btn danger" onclick="${selected.source==='ÖĞRENCİ'?'removeStudentAccrual':'removePledge'}('${esc(selected.id)}')">Sil</button>`:''}${!doubtful&&selected.remaining>0?`<button class="btn primary" onclick="${selected.source==='ÖĞRENCİ'?'studentCollectionModal':'collectionModal'}('${esc(selected.id)}')">Tahsilat gir</button>`:''}${admin&&!doubtful&&selected.source!=='ÖĞRENCİ'?`<button class="btn secondary" onclick="convertSinglePledgeToStudent('${esc(selected.id)}')">Öğrenciye aktar</button>`:''}${admin&&selected.source!=='ÖĞRENCİ'?`<button class="btn ${doubtful?'secondary':'danger'}" onclick="setPledgeDoubtful('${esc(selected.id)}',${!doubtful})">${doubtful?'Aktife geri al':'Şüpheliye taşı'}</button>`:''}</div></div>`:'';
+  const actions=`<div class="actions"><button class="btn secondary" onclick="pledgeColumnsModal()">Sütunlar (${visibleColumns.length}/${columnDefs.length})</button>${doubtful?'':`${bulkActions}<button class="btn secondary" onclick="bulkCollectionModal()">Toplu tahsilat</button><button class="btn primary" onclick="pledgeModal()">Yeni taahhüt</button>`}</div>`;
+  $('#content').innerHTML=panel(doubtful?'Şüpheli alacaklar':'Taahhüt listesi',tabs+search+filters+selectedActions+table(headers,rows,(query||Object.values(f).some(Boolean))?'Filtrelere uyan kayıt bulunamadı.':(doubtful?'Şüpheli alacak kaydı yok.':'Aktif taahhüt kaydı yok.'))+paged.controls+filteredSummary,actions);
+}
+function emptyPledgeFilters(){return {year:'',activity:'',subActivity:'',type:'',reference:'',group:''}}
+function setPledgeTab(tab){state.pledgeTab=tab;state.selectedPledgeId='';state.pledgeFilters=emptyPledgeFilters();resetPage('pledges-'+tab);renderPledges()}
+function applyPledgeSearch(){state.pledgeSearch=$('#pledgeSearchInput').value.trim();state.selectedPledgeId='';resetPage('pledges-'+state.pledgeTab);renderPledges()}
+function clearPledgeSearch(){state.pledgeSearch='';state.selectedPledgeId='';resetPage('pledges-'+state.pledgeTab);renderPledges()}
+function selectPledge(id){state.selectedPledgeId=id;renderPledges()}
+function applyPledgeColumnFilters(){state.pledgeFilters={year:$('#pledgeFilterYear').value,activity:$('#pledgeFilterActivity').value,subActivity:$('#pledgeFilterSubActivity').value,type:$('#pledgeFilterType').value,reference:$('#pledgeFilterReference').value,group:$('#pledgeFilterGroup').value};state.pledgeSort=$('#pledgeSort').value;state.selectedPledgeId='';resetPage('pledges-'+state.pledgeTab);renderPledges()}
+function clearPledgeColumnFilters(){state.pledgeFilters=emptyPledgeFilters();state.pledgeSort='amount-desc';state.selectedPledgeId='';resetPage('pledges-'+state.pledgeTab);renderPledges()}
+async function setPledgeDoubtful(id,doubtful){
+  const message=doubtful?'Bu kayıt şüpheli alacaklara taşınsın mı? Genel toplam ve analizlerden çıkarılacak.':'Bu kayıt aktife geri alınsın mı? Tahsilat ancak aktife alındıktan sonra eklenebilir.';
+  if(!confirm(message))return;
+  await submit('setPledgeReceivableStatus',id,doubtful);
+}
+async function removePledge(id){
+  if(!confirm('Bu taahhüt ve ona bağlı tüm tahsilat hareketleri kalıcı olarak silinsin mi?'))return;
+  setBusy(true);
+  try{const r=await server('deletePledge',state.token,id);toast(`Taahhüt silindi. ${r.deletedCollections} bağlı tahsilat hareketi kaldırıldı.`);scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
+async function removeAllPledges(){
+  const approval=prompt('Tüm taahhütler ve bağlı tahsilatlar kalıcı olarak silinecek. Onaylamak için TÜMÜNÜ SİL yazın:');
+  if(approval===null)return;
+  if(approval.trim().toUpperCase()!=='TÜMÜNÜ SİL'){toast('Toplu silme iptal edildi: onay metni eşleşmedi.',true);return;}
+  setBusy(true);
+  try{const r=await server('deleteAllPledges',state.token,approval);state.pledgeTab='active';alert(`${r.pledgeCount} taahhüt ve ${r.collectionCount} tahsilat hareketi silindi.\n\nSilmeden önce otomatik yedek oluşturuldu:\n${r.backupUrl}`);toast('Toplu silme tamamlandı ve Drive yedeği oluşturuldu.');scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
+function collectionAccountingView(x){const p=(state.data.pledges||[]).find(y=>y.id===x.pledgeId)||{};return {year:p.year||String(x.date||'').slice(0,4),activity:x.activity||p.activity||'',subActivity:p.subActivity||'',accountCode:p.accountCode||'',fullName:x.fullName||p.fullName||'',payer:x.payer||p.payer||'',phone:x.phone||p.phone||'',reference:x.reference||p.reference||'',donationType:x.donationType||p.donationType||'',group:x.group||p.group||'',accrual:x.direct?0:Number(p.amount)||0,paid:Number(x.amount)||0,remaining:x.direct?0:Number(p.remaining)||0,notes:x.note||p.notes||''}}
+function collectionColumnDefinitions(){const approver=isApprover();return [
+  {key:'year',label:'YIL',cell:(x,a)=>esc(a.year)},
+  {key:'activity',label:'FAALİYET',cell:(x,a)=>esc(a.activity)},
+  {key:'subActivity',label:'ALT FAALİYET',cell:(x,a)=>esc(a.subActivity)},
+  {key:'fullName',label:'HESAP ADI',cell:(x,a)=>esc(a.fullName)},
+  {key:'payer',label:'KİMİN ADINA',cell:(x,a)=>esc(a.payer)},
+  {key:'phone',label:'İLETİŞİM TEL',cell:(x,a)=>esc(a.phone)},
+  {key:'reference',label:'REFERANS',cell:(x,a)=>esc(a.reference)},
+  {key:'donationType',label:'REFERANS NEVİ',cell:(x,a)=>esc(a.donationType)},
+  {key:'group',label:'TAKİP EDEN',cell:(x,a)=>esc(a.group)},
+  {key:'accrual',label:'TAHAKKUK (TL)',className:'money',cell:(x,a)=>money(a.accrual)},
+  {key:'paid',label:'ÖDENEN (TL)',className:'money',cell:(x,a)=>money(a.paid)},
+  {key:'remaining',label:'KALAN (TL)',className:'money',cell:(x,a)=>money(a.remaining)},
+  {key:'notes',label:'NOTLAR',cell:(x,a)=>esc(a.notes)},
+  {key:'date',label:'TAHSİLAT TARİHİ',cell:x=>date(x.date)},
+  {key:'receiptNo',label:'MAKBUZ NO',cell:x=>esc(x.receiptNo||'')},
+  {key:'id',label:'TAHSİLAT NO',cell:x=>esc(x.id)},
+  {key:'method',label:'YÖNTEM',cell:x=>esc(x.method)},
+  {key:'accountName',label:'KASA / BANKA',cell:x=>esc(x.accountName||'')},
+  {key:'approvalStatus',label:'ONAY',cell:x=>`<span class="status ${statusClass(x.approvalStatus)}">${esc(x.approvalStatus)}</span>`},
+  {key:'actions',label:'İŞLEM',available:approver,cell:x=>`<div class="row-actions"><button class="btn tiny" onclick="editCollectionModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeCollection('${esc(x.id)}')">Sil</button></div>`}
+].filter(c=>c.available!==false)}
+function visibleCollectionColumnDefinitions(){return collectionColumnDefinitions().filter(c=>state.collectionTab!=='donations'||c.key!=='receiptNo')}
+function collectionColumnsModal(){const hidden=new Set(state.collectionHiddenColumns||[]);const definitions=visibleCollectionColumnDefinitions();const fields=`<div class="wide pledge-column-chooser"><p>Tabloda görmek istediğiniz tahsilat sütunlarını seçin. Seçiminiz kullanıcı hesabınızda saklanır ve giriş yaptığınız diğer cihazlarda da uygulanır.</p><div class="pledge-column-tools"><button class="btn tiny secondary" type="button" onclick="setAllCollectionColumnCheckboxes(true)">Tümünü göster</button><button class="btn tiny" type="button" onclick="setAllCollectionColumnCheckboxes(false)">Tümünü temizle</button></div><div class="pledge-column-grid">${definitions.map(c=>`<label class="pledge-column-item"><input type="checkbox" data-collection-column="${c.key}" ${hidden.has(c.key)?'':'checked'}><span>${esc(c.label)}</span></label>`).join('')}</div></div>`;showModal('Görünen tahsilat sütunları',formHtml(fields,'applyCollectionColumnVisibility()'))}
+function setAllCollectionColumnCheckboxes(checked){document.querySelectorAll('[data-collection-column]').forEach(x=>x.checked=checked)}
+async function applyCollectionColumnVisibility(){const boxes=[...document.querySelectorAll('[data-collection-column]')];const visible=boxes.filter(x=>x.checked).map(x=>x.dataset.collectionColumn);if(!visible.length){toast('En az bir sütun görünür kalmalıdır.',true);return}const previous=(state.collectionHiddenColumns||[]).slice();const currentKeys=new Set(visibleCollectionColumnDefinitions().map(x=>x.key));const preserved=previous.filter(key=>!currentKeys.has(key));const hiddenHere=[...currentKeys].filter(key=>!visible.includes(key));state.collectionHiddenColumns=[...new Set(preserved.concat(hiddenHere))];$('#modal').close();renderCollections();try{await server('saveCollectionColumnPreferences',state.token,state.collectionHiddenColumns);toast('Tahsilat sütun görünümü kullanıcı hesabınıza kaydedildi.')}catch(e){state.collectionHiddenColumns=previous;renderCollections();toast(e.message,true)}}
+function emptyCollectionFilters(){return {year:'',activity:'',subActivity:'',fullName:'',payer:'',phone:'',reference:'',donationType:'',group:'',accrualMin:'',accrualMax:'',paidMin:'',paidMax:'',remainingMin:'',remainingMax:'',notes:'',dateStart:'',dateEnd:'',receiptNo:'',id:'',method:'',accountName:'',approvalStatus:''}}
+function currentCollectionFilters(){state.collectionFilters=state.collectionFilters||{collections:{},donations:{}};return Object.assign(emptyCollectionFilters(),state.collectionFilters[state.collectionTab]||{})}
+function collectionFilterCount(){return Object.values(currentCollectionFilters()).filter(v=>String(v||'').trim()!=='').length}
+function collectionFilterSelect(label,id,values,current){const items=[...new Set((values||[]).map(v=>String(v||'').trim()).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'tr'));return `<label>${esc(label)}<select id="${id}"><option value="">Tümü</option>${items.map(v=>`<option value="${esc(v)}" ${v===String(current||'')?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`}
+function collectionFiltersModal(){
+  const f=currentCollectionFilters();
+  const source=(state.data.collections||[]).filter(x=>state.collectionTab==='donations'?x.direct:!x.direct).map(x=>({x:x,a:collectionAccountingView(x)}));
+  const selects=collectionFilterSelect('YIL','cfYear',source.map(r=>r.a.year),f.year)+collectionFilterSelect('FAALİYET','cfActivity',source.map(r=>r.a.activity),f.activity)+collectionFilterSelect('ALT FAALİYET','cfSubActivity',source.map(r=>r.a.subActivity),f.subActivity)+collectionFilterSelect('REFERANS','cfReference',source.map(r=>r.a.reference),f.reference)+collectionFilterSelect('REFERANS NEVİ','cfDonationType',source.map(r=>r.a.donationType),f.donationType)+collectionFilterSelect('TAKİP EDEN','cfGroup',source.map(r=>r.a.group),f.group)+collectionFilterSelect('YÖNTEM','cfMethod',source.map(r=>r.x.method),f.method)+collectionFilterSelect('KASA / BANKA','cfAccountName',source.map(r=>r.x.accountName),f.accountName)+collectionFilterSelect('ONAY','cfApprovalStatus',source.map(r=>r.x.approvalStatus),f.approvalStatus);
+  const texts=inputField('HESAP ADI','cfFullName','search',false,`value="${esc(f.fullName)}"`)+inputField('KİMİN ADINA','cfPayer','search',false,`value="${esc(f.payer)}"`)+inputField('İLETİŞİM TEL','cfPhone','search',false,`value="${esc(f.phone)}"`)+inputField('NOTLAR','cfNotes','search',false,`value="${esc(f.notes)}"`)+(state.collectionTab==='donations'?'':inputField('MAKBUZ NO','cfReceiptNo','search',false,`value="${esc(f.receiptNo)}"`))+inputField('TAHSİLAT NO','cfId','search',false,`value="${esc(f.id)}"`);
+  const amounts=inputField('TAHAKKUK en az','cfAccrualMin','number',false,`min="0" step="0.01" value="${esc(f.accrualMin)}"`)+inputField('TAHAKKUK en çok','cfAccrualMax','number',false,`min="0" step="0.01" value="${esc(f.accrualMax)}"`)+inputField('ÖDENEN en az','cfPaidMin','number',false,`min="0" step="0.01" value="${esc(f.paidMin)}"`)+inputField('ÖDENEN en çok','cfPaidMax','number',false,`min="0" step="0.01" value="${esc(f.paidMax)}"`)+inputField('KALAN en az','cfRemainingMin','number',false,`min="0" step="0.01" value="${esc(f.remainingMin)}"`)+inputField('KALAN en çok','cfRemainingMax','number',false,`min="0" step="0.01" value="${esc(f.remainingMax)}"`);
+  const dates=inputField('TAHSİLAT TARİHİ başlangıç','cfDateStart','date',false,`value="${esc(f.dateStart)}"`)+inputField('TAHSİLAT TARİHİ bitiş','cfDateEnd','date',false,`value="${esc(f.dateEnd)}"`);
+  showModal('Tahsilat sütun filtreleri',formHtml(selects+texts+amounts+dates+`<div class="wide upload-note collection-filter-modal"><strong>Tüm filtreler birlikte uygulanır.</strong><span>Boş bırakılan alanlar sonucu etkilemez. Tutar alanlarında alt ve üst sınır ayrı ayrı kullanılabilir.</span></div>`,'applyCollectionFilters()'));
+}
+function applyCollectionFilters(){const value=id=>$('#'+id)?.value||'';state.collectionFilters[state.collectionTab]={year:value('cfYear'),activity:value('cfActivity'),subActivity:value('cfSubActivity'),fullName:value('cfFullName').trim(),payer:value('cfPayer').trim(),phone:value('cfPhone').trim(),reference:value('cfReference'),donationType:value('cfDonationType'),group:value('cfGroup'),accrualMin:value('cfAccrualMin'),accrualMax:value('cfAccrualMax'),paidMin:value('cfPaidMin'),paidMax:value('cfPaidMax'),remainingMin:value('cfRemainingMin'),remainingMax:value('cfRemainingMax'),notes:value('cfNotes').trim(),dateStart:value('cfDateStart'),dateEnd:value('cfDateEnd'),receiptNo:value('cfReceiptNo').trim(),id:value('cfId').trim(),method:value('cfMethod'),accountName:value('cfAccountName'),approvalStatus:value('cfApprovalStatus')};$('#modal').close();resetPage('collections');renderCollections()}
+function clearCollectionFilters(){state.collectionFilters[state.collectionTab]=emptyCollectionFilters();resetPage('collections');renderCollections();toast('Seçili sekmenin filtreleri temizlendi.')}
+function setCollectionTab(tab){state.collectionTab=tab==='donations'?'donations':'collections';resetPage('collections');renderCollections()}
+function collectionMatchesFilters(x,a,f){const contains=(value,query)=>!query||normalizeSearch(value).includes(normalizeSearch(query));const eq=(value,query)=>!query||String(value||'')===String(query);const bounded=(value,min,max)=>(min===''||Number(value)>=Number(min))&&(max===''||Number(value)<=Number(max));return eq(a.year,f.year)&&eq(a.activity,f.activity)&&eq(a.subActivity,f.subActivity)&&contains(a.fullName,f.fullName)&&contains(a.payer,f.payer)&&contains(a.phone,f.phone)&&eq(a.reference,f.reference)&&eq(a.donationType,f.donationType)&&eq(a.group,f.group)&&bounded(a.accrual,f.accrualMin,f.accrualMax)&&bounded(a.paid,f.paidMin,f.paidMax)&&bounded(a.remaining,f.remainingMin,f.remainingMax)&&contains(a.notes,f.notes)&&(!f.dateStart||String(x.date||'')>=f.dateStart)&&(!f.dateEnd||String(x.date||'')<=f.dateEnd)&&contains(x.receiptNo,f.receiptNo)&&contains(x.id,f.id)&&eq(x.method,f.method)&&eq(x.accountName,f.accountName)&&eq(x.approvalStatus,f.approvalStatus)}
+function startCollectionBulkEdit(){if(!isApprover())return;state.collectionBulkEdit={active:true,saving:false,drafts:{}};renderCollections();toast('Toplu düzenleme açıldı. Sekmeler ve sayfalar arasında geçerken değişiklikler korunur.')}
+function collectionBulkDraftCount(){return Object.keys((state.collectionBulkEdit&&state.collectionBulkEdit.drafts)||{}).filter(id=>Object.keys(state.collectionBulkEdit.drafts[id]||{}).length).length}
+function setCollectionBulkValue(id,key,value){const mode=state.collectionBulkEdit;if(!mode||!mode.active||mode.saving)return;mode.drafts[id]=mode.drafts[id]||{};mode.drafts[id][key]=value;const badge=$('#collectionBulkEditCount');if(badge)badge.textContent=collectionBulkDraftCount()+' kayıt değişti'}
+function cancelCollectionBulkEdit(){const count=collectionBulkDraftCount();if(count&&!confirm(`${count} kayıttaki kaydedilmemiş değişiklik iptal edilsin mi?`))return;state.collectionBulkEdit={active:false,saving:false,drafts:{}};renderCollections()}
+function collectionBulkCurrentValue(x,a,key){const d=(state.collectionBulkEdit.drafts||{})[x.id]||{};if(Object.prototype.hasOwnProperty.call(d,key))return d[key];const values={activity:a.activity,fullName:a.fullName,payer:a.payer,phone:a.phone,reference:a.reference,donationType:a.donationType,group:a.group,note:x.note||'',date:x.date||'',receiptNo:x.receiptNo||'',amount:x.amount,method:x.method||'',accountId:x.accountId||''};return values[key]==null?'':values[key]}
+function collectionBulkInput(x,a,key,type='text'){
+  const value=collectionBulkCurrentValue(x,a,key);const disabled=state.collectionBulkEdit.saving?' disabled':'';const common=`data-bulk-id="${esc(x.id)}" data-bulk-key="${esc(key)}"${disabled}`;
+  if(key==='method'){const values=[...new Set([...(state.data.methods||[]),String(value||'')].filter(Boolean))];return `<select class="bulk-cell-input" ${common} onchange="setCollectionBulkValue('${esc(x.id)}','method',this.value)">${values.map(v=>`<option value="${esc(v)}" ${v===value?'selected':''}>${esc(v)}</option>`).join('')}</select>`}
+  if(key==='accountId'){let accounts=((state.data.cash&&state.data.cash.accounts)||[]).slice();if(value&&!accounts.some(v=>v.id===value))accounts.unshift({id:value,name:x.accountName||value});return `<select class="bulk-cell-input bulk-cell-account" ${common} onchange="setCollectionBulkValue('${esc(x.id)}','accountId',this.value)">${accounts.map(v=>`<option value="${esc(v.id)}" ${v.id===value?'selected':''}>${esc(v.name)}</option>`).join('')}</select>`}
+  const step=type==='number'?' min="0.01" step="0.01"':'';const event=type==='date'?'onchange':'oninput';return `<input class="bulk-cell-input" ${common} type="${type}" value="${esc(value)}"${step} ${event}="setCollectionBulkValue('${esc(x.id)}','${esc(key)}',this.value)">`;
+}
+function collectionBulkCell(column,x,a){
+  const editable={activity:['activity','text'],fullName:['fullName','text'],payer:['payer','text'],phone:['phone','text'],reference:['reference','text'],donationType:['donationType','text'],group:['group','text'],notes:['note','text'],date:['date','date'],receiptNo:['receiptNo','text'],paid:['amount','number'],method:['method','select'],accountName:['accountId','select']};
+  const config=editable[column.key];if(config)return collectionBulkInput(x,a,config[0],config[1]);
+  return `<span class="bulk-cell-locked" title="Bu alan sistem tarafından hesaplanır veya bağlı taahhütten gelir">${column.cell(x,a)}</span>`;
+}
+function saveCollectionBulkEdit(){
+  const mode=state.collectionBulkEdit;const ids=Object.keys(mode.drafts||{}).filter(id=>Object.keys(mode.drafts[id]||{}).length);if(!ids.length){toast('Değiştirilen kayıt yok.',true);return}if(!confirm(`${ids.length} kayıttaki değişiklikler topluca kaydedilsin mi?`))return;
+  mode.saving=true;const items=ids.map(id=>({id:id,changes:mode.drafts[id]}));renderCollections();toast(`${items.length} kayıt arka planda doğrulanıyor ve kaydediliyor.`);
+  server('bulkUpdateCollections',state.token,{items:items}).then(r=>{state.collectionBulkEdit={active:false,saving:false,drafts:{}};toast(`${r.updated} kayıt kaydedildi; ${r.recalculatedPledges} taahhüt bakiyesi yeniden hesaplandı.`);scheduleDataSync()}).catch(e=>{state.collectionBulkEdit.saving=false;toast(e.message,true);if(state.view==='collections')renderCollections()});
+}
+function renderCollections(){
+  heading('Tahsilatlar ve teberru','Taahhüde bağlı tahsilatlar ile doğrudan teberru kayıtları ayrı izlenir');
+  const f=currentCollectionFilters();
+  const allCollections=state.data.collections||[];const collectionCount=allCollections.filter(x=>!x.direct).length;const donationCount=allCollections.filter(x=>x.direct).length;
+  const enriched=allCollections.filter(x=>state.collectionTab==='donations'?x.direct:!x.direct).map(x=>({x:x,a:collectionAccountingView(x)}));
+  const filtered=enriched.filter(r=>collectionMatchesFilters(r.x,r.a,f)).sort((r1,r2)=>Number(r2.x.amount)-Number(r1.x.amount));
+  const records=filtered.map(r=>r.x);const accountingMap={};filtered.forEach(r=>accountingMap[r.x.id]=r.a);
+  const paged=pageData('collections',records);const columnDefs=visibleCollectionColumnDefinitions();const hiddenColumns=new Set(state.collectionHiddenColumns||[]);let visibleColumns=columnDefs.filter(c=>!hiddenColumns.has(c.key));if(!visibleColumns.length){state.collectionHiddenColumns=[];visibleColumns=columnDefs.slice()}
+  const editing=Boolean(state.collectionBulkEdit&&state.collectionBulkEdit.active);const rows=paged.items.map(x=>{const a=accountingMap[x.id]||collectionAccountingView(x);return `<tr${editing?' class="bulk-edit-row"':''}>${visibleColumns.map(c=>`<td${c.className?` class="${c.className}"`:''}>${editing?collectionBulkCell(c,x,a):c.cell(x,a)}</td>`).join('')}</tr>`});
+  const totals=filtered.reduce((s,r)=>{s.accrual+=Number(r.a.accrual)||0;s.paid+=Number(r.a.paid)||0;s.remaining+=Number(r.a.remaining)||0;return s},{accrual:0,paid:0,remaining:0});
+  const activeCount=collectionFilterCount();const filterSummary=`<div class="pledge-filter-summary"><div><span>Filtrelenen kayıt</span><strong>${records.length}</strong></div><div><span>Toplam tahakkuk</span><strong>${money(totals.accrual)}</strong></div><div><span>Toplam tahsilat</span><strong>${money(totals.paid)}</strong></div><div><span>Toplam kalan</span><strong>${money(totals.remaining)}</strong></div></div>`;
+  const deleteDonations=state.data.user.role==='YÖNETİCİ'?'<button class="btn danger" onclick="removeAllDonations()">Tüm teberruları sil</button>':'';
+  const donationActions=isApprover()?`<button class="btn secondary" onclick="downloadBulkDonationTemplate()">Bağış şablonu indir</button><button class="btn secondary" onclick="bulkDonationImportModal()">Toplu teberru aktar</button>${deleteDonations}`:'';
+  const entryActions=state.collectionTab==='donations'?`${donationActions}<button class="btn primary" onclick="quickDonationModal()">Hızlı teberru ekle</button>`:'<button class="btn secondary" onclick="bulkCollectionModal()">Toplu tahsilat</button><button class="btn primary" onclick="collectionModal()">Taahhütten tahsilat</button>';
+  const bulkActions=isApprover()?(editing?`<span id="collectionBulkEditCount" class="bulk-edit-count">${collectionBulkDraftCount()} kayıt değişti</span><button class="btn primary" ${state.collectionBulkEdit.saving?'disabled':''} onclick="saveCollectionBulkEdit()">${state.collectionBulkEdit.saving?'Kaydediliyor…':'Tümünü kaydet'}</button><button class="btn" ${state.collectionBulkEdit.saving?'disabled':''} onclick="cancelCollectionBulkEdit()">İptal</button>`:'<button class="btn secondary" onclick="startCollectionBulkEdit()">Tüm satırları düzenlemeye aç</button>'):'';
+  const excelExport=state.data.user.role==='YÖNETİCİ'?'<button class="btn secondary" onclick="downloadAllDataExcel()">Tüm verileri Excel\'e aktar</button>':'';
+  const actions=`<div class="actions"><button class="btn ${activeCount?'primary':'secondary'}" onclick="collectionFiltersModal()">Filtreler${activeCount?` (${activeCount})`:''}</button>${activeCount?'<button class="btn" onclick="clearCollectionFilters()">Filtreleri temizle</button>':''}<button class="btn secondary" onclick="collectionColumnsModal()">Sütunlar (${visibleColumns.length}/${columnDefs.length})</button>${excelExport}${bulkActions}${editing?'':entryActions}</div>`;
+  const tabs=`<div class="tabs"><button class="tab ${state.collectionTab==='collections'?'active':''}" onclick="setCollectionTab('collections')">Tahsilatlar (${collectionCount})</button><button class="tab ${state.collectionTab==='donations'?'active':''}" onclick="setCollectionTab('donations')">Teberru (${donationCount})</button></div>`;
+  const panelTitle=state.collectionTab==='donations'?'Teberru hareketleri':'Taahhüde bağlı tahsilatlar';
+  const editNote=editing?`<div class="bulk-edit-banner"><strong>Toplu düzenleme açık.</strong><span>Düzenlenebilir hücrelerin üzerine tıklayın. Tahsilatlar ve Teberru sekmeleri ile sayfalar arasında geçebilirsiniz; taslaklar Tümünü Kaydet'e kadar korunur. Soluk alanlar hesaplanan veya bağlı taahhütten gelen kilitli alanlardır.</span></div>`:'';
+  $('#content').innerHTML=panel(panelTitle,editNote+tabs+table(visibleColumns.map(c=>c.label),rows)+paged.controls+filterSummary,actions,'Filtreler yalnızca seçili sekmedeki listeyi ve aşağıdaki toplamları etkiler. Bekleyen ve reddedilen kayıtlar kasa, gelir ve taahhüt bakiyesini etkilemez.');
 }
 
-frame.addEventListener('load',()=>{
-  frame.dataset.loaded='true';
-  if(navigator.onLine){loadingView.hidden=true;offlineView.hidden=true;frame.hidden=false;}
-});
-window.addEventListener('online',()=>{frame.src=FRAME_URL;delete frame.dataset.loaded;showOnlineState()});
-window.addEventListener('offline',showOnlineState);
-document.querySelector('#retryButton').addEventListener('click',()=>{frame.src=FRAME_URL;delete frame.dataset.loaded;showOnlineState()});
+async function removeAllDonations(){
+  const approval=prompt('Tüm teberrular kalıcı olarak silinecek ve kasa/banka toplamları yeniden hesaplanacaktır. Devam etmek için TEBERRULARI SİL yazın:');
+  if(approval===null)return;
+  if(approval.trim().toUpperCase()!=='TEBERRULARI SİL'){toast('Silme işlemi iptal edildi: onay metni eşleşmedi.',true);return;}
+  if(!confirm('Son onay: Tüm teberru kayıtları silinsin mi? Silmeden önce otomatik Drive yedeği oluşturulacaktır.'))return;
+  setBusy(true);
+  try{const r=await server('deleteAllDonations',state.token,approval);alert(`${r.donationCount} teberru kaydı, toplam ${money(r.total)} silindi.\n\nSilmeden önce otomatik yedek oluşturuldu:\n${r.backupUrl||'Silinecek kayıt bulunmadı.'}`);toast('Toplu teberru silme tamamlandı.');scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
 
-window.addEventListener('beforeinstallprompt',event=>{
-  event.preventDefault();installPrompt=event;installButton.hidden=false;
-});
-installButton.addEventListener('click',async()=>{
-  if(!installPrompt)return;installPrompt.prompt();await installPrompt.userChoice;installPrompt=null;installButton.hidden=true;
-});
-window.addEventListener('appinstalled',()=>{installPrompt=null;installButton.hidden=true});
+function renderApprovals(){
+  heading('Onay Bekleyenler','Tüm tahsilatların onay durumları ve muhasebe işlemleri');
+  const source=(state.data.approvals&&state.data.approvals.items)||[];
+  const statusMap={pending:'BEKLİYOR',approved:'ONAYLANDI',rejected:'REDDEDİLDİ'};
+  const records=state.approvalTab==='all'?source:source.filter(x=>x.approvalStatus===statusMap[state.approvalTab]);
+  const totals=source.reduce((s,x)=>{s.counts[x.approvalStatus]=(s.counts[x.approvalStatus]||0)+1;s.amounts[x.approvalStatus]=(s.amounts[x.approvalStatus]||0)+(Number(x.amount)||0);return s},{counts:{},amounts:{}});
+  const paged=pageData('approvals-'+state.approvalTab,records);
+  const actions=x=>x.approvalStatus==='BEKLİYOR'?`<button class="btn tiny primary" onclick="approveCollectionEntry('${esc(x.id)}')">Onayla</button><button class="btn tiny danger" onclick="rejectCollectionEntry('${esc(x.id)}')">Reddet</button>`:`<button class="btn tiny secondary" onclick="reopenCollectionEntry('${esc(x.id)}')">Onayı geri al</button>`;
+  const rows=paged.items.map(x=>`<tr><td>${esc(x.id)}</td><td>${date(x.date)}</td><td>${esc(x.fullName)}</td><td>${esc(x.donationType)}</td><td>${esc(x.reference)}</td><td class="money">${money(x.amount)}</td><td>${esc(x.accountName||'')}</td><td>${esc(x.createdBy||'')}</td><td>${esc(x.createdAt||'')}</td><td><span class="status ${statusClass(x.approvalStatus)}">${esc(x.approvalStatus)}</span>${x.rejectionReason?`<small class="cell-note">${esc(x.rejectionReason)}</small>`:''}</td><td>${esc(x.approvedBy||'')}</td><td>${esc(x.approvedAt||'')}</td><td><div class="row-actions">${actions(x)}<button class="btn tiny" onclick="editCollectionModal('${esc(x.id)}')">Düzelt</button></div></td></tr>`);
+  const tabs=`<div class="tabs"><button class="tab ${state.approvalTab==='all'?'active':''}" onclick="setApprovalTab('all')">Tümü (${source.length})</button><button class="tab ${state.approvalTab==='pending'?'active':''}" onclick="setApprovalTab('pending')">Bekleyen (${totals.counts.BEKLİYOR||0})</button><button class="tab ${state.approvalTab==='approved'?'active':''}" onclick="setApprovalTab('approved')">Onaylanan (${totals.counts.ONAYLANDI||0})</button><button class="tab ${state.approvalTab==='rejected'?'active':''}" onclick="setApprovalTab('rejected')">Reddedilen (${totals.counts.REDDEDİLDİ||0})</button></div>`;
+  const summary=cards([['Onay bekleyen',`${totals.counts.BEKLİYOR||0} kayıt`],['Bekleyen toplam',money(totals.amounts.BEKLİYOR||0)],['Onaylanan toplam',money(totals.amounts.ONAYLANDI||0)],['Reddedilen toplam',money(totals.amounts.REDDEDİLDİ||0)]]);
+  $('#content').innerHTML=summary+panel('Tüm tahsilatlar',tabs+table(['Tahsilat No','Tarih','Ad Soyad','Tür','Referans','Tutar','Hesap','Giren','Giriş zamanı','Durum','Onaylayan','Onay zamanı','İşlem'],rows)+paged.controls,'','Yalnızca onaylanan kayıtlar tahsilat, kalan bakiye ve kasa toplamlarına işlenir.');
+}
+function setApprovalTab(tab){state.approvalTab=tab;resetPage('approvals-'+tab);renderApprovals()}
+async function approveCollectionEntry(id){if(!confirm('Bu tahsilat onaylansın ve kasa ile taahhüt bakiyesine işlensin mi?'))return;await submit('approveCollection',id)}
+async function rejectCollectionEntry(id){const reason=prompt('Red nedenini yazın:');if(reason===null)return;if(!reason.trim()){toast('Red nedeni zorunludur.',true);return;}await submit('rejectCollection',id,reason)}
+async function reopenCollectionEntry(id){if(!confirm('Bu kaydın onayı geri alınsın mı? Onaylanmışsa kasa ve taahhüt etkisi geri çevrilecektir.'))return;await submit('reopenCollectionApproval',id)}
 
-if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('./sw.js').catch(()=>{}));}
-showOnlineState();
+function renderStudents(){
+  heading('Öğrenci ödemeleri','Peşinat + 8 taksit planı, geciken ödemeler ve kalan bakiyeler');
+  const d=state.data.students||{summary:{total:0,paid:0,remaining:0,period:0,overdue:0,overdueCount:0},accruals:[],payments:[]};
+  const q=normalizeSearch(state.studentSearch);
+  const accruals=d.accruals.filter(x=>!q||normalizeSearch([x.id,x.fullName,x.payer,x.phone,x.donationType,x.status].join(' ')).includes(q));
+  const payments=d.payments.filter(x=>!q||normalizeSearch([x.id,x.pledgeId,x.fullName,x.payer,x.donationType,x.method,x.accountName].join(' ')).includes(q));
+  const tabs=`<div class="tabs"><button class="tab ${state.studentTab==='accruals'?'active':''}" onclick="setStudentTab('accruals')">Tahakkuklar</button><button class="tab ${state.studentTab==='payments'?'active':''}" onclick="setStudentTab('payments')">Tahsilatlar</button></div>`;
+  const search=`<div class="pledge-search"><input id="studentSearchInput" type="search" value="${esc(state.studentSearch)}" placeholder="Öğrenci, veli, numara veya tür ara" onkeydown="if(event.key==='Enter'){event.preventDefault();applyStudentSearch()}"><button class="btn secondary" onclick="applyStudentSearch()">Ara</button>${state.studentSearch?'<button class="btn" onclick="clearStudentSearch()">Temizle</button>':''}<span>${q?(state.studentTab==='accruals'?accruals.length:payments.length)+' kayıt bulundu.':'Tüm öğrenci kayıtlarında arama yapabilirsiniz.'}</span></div>`;
+  let body='';let action='';
+  if(state.studentTab==='payments'){
+    const paged=pageData('student-payments',payments.slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))));
+    const rows=paged.items.map(x=>`<tr><td>${esc(x.id)}</td><td>${date(x.date)}</td><td>${esc(x.pledgeId)}</td><td>${esc(x.fullName)}</td><td>${esc(x.donationType)}</td><td class="money">${money(x.amount)}</td><td>${esc(x.method)}</td><td>${esc(x.accountName||'')}</td><td><div class="row-actions"><button class="btn tiny" onclick="editCollectionModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeCollection('${esc(x.id)}')">Sil</button></div></td></tr>`);
+    body=tabs+search+table(['Tahsilat No','Tarih','Tahakkuk No','Öğrenci','Ödeme Türü','Tutar','Yöntem','Kasa / Banka','İşlem'],rows,'Öğrenci tahsilatı bulunamadı.')+paged.controls;
+    action='<button class="btn primary" onclick="studentCollectionModal()">Öğrenci tahsilatı ekle</button>';
+  }else{
+    const paged=pageData('student-accruals',accruals.slice().sort((a,b)=>b.remaining-a.remaining));
+    const rows=paged.items.map(x=>{const p=x.paymentPlan||{};const planStatus=p.configured?p.status:'Plan girilmedi';const planClass=p.overdueAmount>0?'red':(p.configured?'green':'amber');return `<tr><td>${esc(x.id)}</td><td>${date(x.pledgeDate)}</td><td>${esc(x.fullName)}</td><td>${esc(x.payer||'')}</td><td>${esc(x.phone||'')}</td><td>${esc(x.donationType)}</td><td class="money">${money(x.amount)}</td><td class="money">${money(p.downPayment||0)}</td><td class="money">${p.configured?money(p.monthlyInstallment):'—'}</td><td class="money">${money(x.paid)}</td><td class="money">${money(x.remaining)}</td><td>${p.nextDueDate?date(p.nextDueDate):'—'}</td><td class="money overdue-value">${money(p.overdueAmount||0)}</td><td><span class="status ${planClass}">${esc(planStatus)}</span></td><td><div class="row-actions"><button class="btn tiny" onclick="showStudentPaymentPlan('${esc(x.id)}')">Plan</button><button class="btn tiny" onclick="editStudentAccrualModal('${esc(x.id)}')">Düzenle</button>${x.remaining>0?`<button class="btn tiny secondary" onclick="studentCollectionModal('${esc(x.id)}')">Tahsilat</button>`:''}<button class="btn tiny danger" onclick="removeStudentAccrual('${esc(x.id)}')">Sil</button></div></td></tr>`});
+    body=tabs+search+table(['Tahakkuk No','Tarih','Öğrenci','Veli / Ödeyen','Telefon','Ödeme Türü','Toplam','Peşinat','8 Taksit / Ay','Ödenen','Kalan','Sıradaki Vade','Geciken','Plan Durumu','İşlem'],rows,'Öğrenci tahakkuku bulunamadı.')+paged.controls;
+    action='<div class="actions"><button class="btn secondary" onclick="studentPledgeImportModal()">Taahhütlerden aktar</button><button class="btn secondary" onclick="studentCollectionModal()">Tahsilat ekle</button><button class="btn primary" onclick="studentAccrualModal()">Yeni tahakkuk</button></div>';
+  }
+  $('#content').innerHTML=cards([['Geciken ödeme',money(d.summary.overdue),"showOverdueStudents()"],['Toplam tahakkuk',money(d.summary.total)],['Toplam tahsilat',money(d.summary.paid)],['Kalan',money(d.summary.remaining)],['Dönem tahsilatı',money(d.summary.period)]])+panel('Öğrenci ödeme kayıtları',body,action,`${d.summary.overdueCount||0} öğrencide gecikmiş ödeme bulunuyor. Kayıtlar gelir ve kasa toplamlarına dahildir; referans analizine dahil edilmez.`);
+}
+function studentRecordById(id){return [...(state.data.students?.accruals||[]),...(state.data.students?.overdueItems||[])].find(r=>r.id===id)}
+function showStudentPaymentPlan(id){const x=studentRecordById(id);if(!x)return;const p=x.paymentPlan||{};if(!p.configured){editStudentAccrualModal(id);toast('Bu öğrenci için peşinat ve ilk taksit tarihini girerek planı tamamlayın.');return}const rows=(p.schedule||[]).map(i=>`<tr><td>${esc(i.label)}</td><td>${date(i.dueDate)}</td><td class="money">${money(i.amount)}</td><td class="money">${money(i.paid)}</td><td class="money">${money(i.remaining)}</td><td><span class="status ${i.overdue?'red':(i.remaining<=0?'green':'amber')}">${esc(i.status)}</span></td></tr>`);const summary=`<div class="remaining-modal-summary"><div><span>Toplam</span><strong>${money(x.amount)}</strong></div><div><span>Ödenen</span><strong>${money(x.paid)}</strong></div><div><span>Kalan</span><strong>${money(x.remaining)}</strong></div><div><span>Geciken</span><strong class="overdue-value">${money(p.overdueAmount)}</strong></div></div>`;showModal(`${x.fullName} · Ödeme planı`,summary+`<div class="remaining-tables"><div class="upload-note"><strong>Peşinat + 8 aylık taksit</strong><span>Peşinat: ${money(p.downPayment)} · Aylık taksit: ${money(p.monthlyInstallment)} · İlk taksit: ${date(p.firstInstallmentDate)}</span></div>${table(['Ödeme','Vade','Tutar','Ödenen','Kalan','Durum'],rows)}</div>`)}
+function showOverdueStudents(){const items=(state.data.students?.overdueItems||[]).slice().sort((a,b)=>b.paymentPlan.overdueAmount-a.paymentPlan.overdueAmount);const rows=items.map(x=>`<tr><td>${esc(x.fullName)}</td><td>${esc(x.payer||'')}</td><td>${esc(x.phone||'')}</td><td class="money">${money(x.paymentPlan.overdueAmount)}</td><td class="money">${money(x.remaining)}</td><td><button class="btn tiny secondary" onclick="showStudentPaymentPlan('${esc(x.id)}')">Taksitleri gör</button></td></tr>`);const total=items.reduce((s,x)=>s+(Number(x.paymentPlan.overdueAmount)||0),0);showModal('Geciken öğrenci ödemeleri',`<div class="remaining-modal-summary"><div><span>Geciken öğrenci</span><strong>${items.length}</strong></div><div><span>Toplam geciken</span><strong class="overdue-value">${money(total)}</strong></div><div><span>Toplam kalan</span><strong>${money(items.reduce((s,x)=>s+(Number(x.remaining)||0),0))}</strong></div></div><div class="remaining-tables">${table(['Öğrenci','Veli / Ödeyen','Telefon','Geciken','Toplam Kalan','İşlem'],rows,'Geciken öğrenci ödemesi yok.')}</div>`)}
+function setStudentTab(tab){state.studentTab=tab;resetPage('student-'+tab);renderStudents()}
+function applyStudentSearch(){state.studentSearch=$('#studentSearchInput').value.trim();resetPage('student-'+state.studentTab);renderStudents()}
+function clearStudentSearch(){state.studentSearch='';resetPage('student-'+state.studentTab);renderStudents()}
+function renderAccounting(){heading('Muhasebe aktarımı','Harici muhasebe sistemindeki tahsilat ve ödemeleri topluca aktarın');const paged=pageData('accounting',state.data.accountingImports||[]);const rows=paged.items.map(x=>`<tr><td>${esc(x.externalId)}</td><td>${esc(x.type)}</td><td>${esc(x.systemId)}</td><td>${date(x.date)}</td><td class="money">${money(x.amount)}</td><td>${esc(x.user)}</td><td>${esc(x.importedAt)}</td></tr>`);const note=`<div class="upload-note accounting-note"><strong>Desteklenen işlem türleri</strong><span>TAHSİLAT, HIZLI BAĞIŞ, PERSONEL ÖDEMESİ ve ÖĞRETMEN ÖDEMESİ.</span><span>Dosya Excel ile açılabilen CSV biçimindedir. Aynı MUHASEBE KAYIT NO ikinci kez yüklenmez.</span></div>`;const backupNote=`<div class="upload-note accounting-note"><strong>Tam sistem yedeği</strong><span>Bütün veri sayfaları, veri türlerini koruyan tek bir JSON dosyasına kaydedilir.</span><span>Dosya kullanıcı bilgileri ve finansal kayıtlar içerir; güvenli bir yerde saklayın.</span></div>`;$('#content').innerHTML=panel('Tam veri yedeği',backupNote,'<div class="actions"><button class="btn primary" onclick="downloadFullDataBackup()">Tam veri yedeğini indir</button><button class="btn secondary" onclick="pledgeBackupRestoreModal()">Silinen taahhütleri geri yükle</button></div>','Drive otomatik yedeğinden veya indirilen tam JSON yedeğinden geri yükleme yapılabilir.')+panel('Toplu muhasebe hareketi',note+table(['Muhasebe No','İşlem Türü','Sistem No','Tarih','Tutar','Aktaran','Aktarım Zamanı'],rows,'Henüz muhasebe aktarımı yapılmadı.')+paged.controls,'<div class="actions"><button class="btn secondary" onclick="downloadAccountingTemplate()">Excel şablonu indir</button><button class="btn primary" onclick="accountingImportModal()">Doldurulmuş dosyayı yükle</button></div>')}
+
+async function downloadFullDataBackup(){if(!confirm('Bütün sistem verileri tek JSON yedek dosyası olarak indirilsin mi? Dosya kullanıcı ve finans bilgileri içerir.'))return;setBusy(true);try{const r=await server('generateFullDataBackup',state.token);downloadBase64File(r);toast(`${r.sheetCount} veri sayfası ve ${r.rowCount} satır yedeklendi.`)}catch(e){toast(e.message,true)}finally{setBusy(false)}}
+function pledgeBackupRestoreModal(){
+  const fields=`<label class="wide">Yedek kaynağı<select id="fRestoreSource" onchange="togglePledgeRestoreSource()"><option value="drive">Silme işleminde oluşturulan Drive yedeği</option><option value="json">İndirilen tam JSON yedeği</option></select></label><label id="restoreDriveField" class="wide">Google E-Tablo yedek bağlantısı<input id="fRestoreDriveUrl" type="url" placeholder="https://docs.google.com/spreadsheets/d/..." autocomplete="off"></label><label id="restoreJsonField" class="wide hidden">Tam JSON yedek dosyası<input id="fRestoreJsonFile" type="file" accept=".json,application/json"></label><div class="wide upload-note"><strong>Güvenli birleştirme yapılır.</strong><span>Mevcut kayıtlar silinmez veya değiştirilmez. Aynı taahhüt/tahsilat numarası zaten varsa atlanır; yalnızca eksik kayıtlar geri eklenir.</span><span>Otomatik Drive yedeğinin bağlantısı, “Tümünü sil” işleminden sonra gösterilmişti ve Drive'ınızda “Tahsilat Sistemi Yedek” adıyla bulunabilir.</span></div><label class="wide">Onay için TAAHHÜTLERİ GERİ YÜKLE yazın<input id="fRestoreConfirmation" type="text" autocomplete="off"></label>`;
+  showModal('Silinen taahhütleri geri yükle',formHtml(fields,'submitPledgeBackupRestore()'));
+}
+function togglePledgeRestoreSource(){const json=$('#fRestoreSource')?.value==='json';$('#restoreDriveField')?.classList.toggle('hidden',json);$('#restoreJsonField')?.classList.toggle('hidden',!json)}
+async function submitPledgeBackupRestore(){
+  const sourceType=$('#fRestoreSource')?.value||'drive';const confirmationText=$('#fRestoreConfirmation')?.value||'';let jsonText='';
+  if(confirmationText.trim().toLocaleUpperCase('tr-TR')!=='TAAHHÜTLERİ GERİ YÜKLE'){toast('Onay metnini eksiksiz yazın.',true);return}
+  if(sourceType==='json'){
+    const file=$('#fRestoreJsonFile')?.files?.[0];if(!file){toast('JSON yedek dosyasını seçin.',true);return}if(file.size>25*1024*1024){toast('Yedek dosyası 25 MB boyutundan büyük olamaz.',true);return}jsonText=await file.text();
+  }else if(!$('#fRestoreDriveUrl')?.value.trim()){toast('Drive yedek bağlantısını girin.',true);return}
+  if(!confirm('Yedekteki eksik taahhütler ve bunlara bağlı tahsilatlar mevcut sisteme eklensin mi?'))return;
+  const payload={sourceType:sourceType,driveUrl:$('#fRestoreDriveUrl')?.value.trim()||'',jsonText:jsonText,confirmationText:confirmationText};
+  setBusy(true);try{const r=await server('restorePledgeBackup',state.token,payload);scheduleDataSync();alert(`${r.restoredPledges} taahhüt ve ${r.restoredCollections} tahsilat geri yüklendi.\n${r.skippedPledges} taahhüt ve ${r.skippedCollections} tahsilat mevcut/uygunsuz olduğu için atlandı.`);toast('Yedekten geri yükleme tamamlandı.')}catch(e){alert(e.message);toast(e.message,true)}finally{setBusy(false)}
+}
+function renderReferences(){
+  const isDonation=state.referenceSource==='donations';
+  const targetType=isDonation?'TEBERRU':'TAHSİLAT';
+  heading('Teberru ve tahsilat','Referans bazlı gerçekleşme ve hedef performansı');
+  const admin=state.data.user.role==='YÖNETİCİ';
+  const sourceTabs=`<div class="tabs"><button class="tab ${!isDonation?'active':''}" onclick="setReferenceSource('collections')">Tahsilat</button><button class="tab ${isDonation?'active':''}" onclick="setReferenceSource('donations')">Teberru</button></div>`;
+  const modeTabs=`<div class="tabs"><button class="tab ${state.referenceTab==='analysis'?'active':''}" onclick="setReferenceTab('analysis')">Referans analizi</button><button class="tab ${state.referenceTab==='targets'?'active':''}" onclick="setReferenceTab('targets')">Hedefler</button></div>`;
+  const tabs=`<div class="reference-tab-groups">${sourceTabs}${modeTabs}</div>`;
+  if(state.referenceTab==='analysis'){
+    if(isDonation){
+      const data=[...(state.data.referenceDonationAnalysis||[])].sort((a,b)=>b.period-a.period);
+      const rows=data.map(x=>`<tr><td>${esc(x.name)}</td><td>${x.count}</td><td class="money">${money(x.collected)}</td><td class="money">${money(x.period)}</td><td>${(x.periodRate*100).toFixed(1)}%</td></tr>`);
+      const total=data.reduce((s,x)=>s+(Number(x.period)||0),0);
+      $('#content').innerHTML=cards([['Referans sayısı',data.length],['Dönem teberru',money(total)]])+panel('Referans bazlı teberru listesi',tabs+table(['Referans','Teberru Sayısı','Tüm Zaman Teberru','Dönem Teberru','Dönem Payı'],rows,'Referanslı teberru bulunamadı.'),'','Yalnız doğrudan teberrular gösterilir; taahhüde bağlı tahsilatlar bu listeye dahil değildir.');return;
+    }
+    const rows=[...(state.data.referenceAnalysis||[])].sort((a,b)=>b.period-a.period).map(x=>`<tr><td>${esc(x.name)}</td><td>${x.count}</td><td class="money">${money(x.pledged)}</td><td class="money">${money(x.periodPledged)}</td><td class="money">${money(x.collected)}</td><td class="money">${money(x.period)}</td><td class="money">${money(x.remaining)}</td><td>${(x.rate*100).toFixed(1)}%</td></tr>`);
+    $('#content').innerHTML=panel('Referans bazlı tahsilat listesi',tabs+table(['Referans','Taahhüt Sayısı','Tüm Zaman Temin','Dönem Temin','Tüm Zaman Tahsilat','Dönem Tahsilat','Kalan','Tahsilat / Temin'],rows,'Referanslı tahsilat bulunamadı.'),'','Yalnız taahhüde bağlı tahsilatlar gösterilir. Dönem tahsilatına göre büyükten küçüğe sıralanır.');return;
+  }
+  const targetData=state.data.referenceTargets||{items:[],summary:{}};
+  const typedTargets=(targetData.items||[]);
+  const periodKeys=[...new Set(typedTargets.map(x=>x.periodKey||String(x.start||'').slice(0,7)).filter(Boolean))].sort().reverse();
+  if(state.targetPeriod===null)state.targetPeriod=periodKeys.includes(currentMonthValue())?currentMonthValue():'';
+  if(state.targetPeriod&&!periodKeys.includes(state.targetPeriod))state.targetPeriod='';
+  const visibleTargets=typedTargets.filter(x=>!state.targetPeriod||(x.periodKey||String(x.start||'').slice(0,7))===state.targetPeriod);
+  const sorters={'combined-actual':(a,b)=>(Number(b.actualPledged)+Number(b.actualCollected))-(Number(a.actualPledged)+Number(a.actualCollected)),'pledge-target':(a,b)=>b.pledgeTarget-a.pledgeTarget,'pledge-actual':(a,b)=>b.actualPledged-a.actualPledged,'pledge-rate':(a,b)=>b.pledgeRate-a.pledgeRate,'collection-target':(a,b)=>b.collectionTarget-a.collectionTarget,'collection-actual':(a,b)=>b.actualCollected-a.actualCollected,'collection-rate':(a,b)=>b.collectionRate-a.collectionRate,'name':(a,b)=>a.reference.localeCompare(b.reference,'tr')};
+  const items=[...visibleTargets].sort(sorters[state.targetSort]||sorters['collection-rate']);
+  const achievementClass=x=>x.achievementStatus==='Hedefe ulaşıldı'?'green':(x.achievementStatus==='Devam ediyor'||x.achievementStatus==='Bekliyor'?'amber':'red');
+  const achievementDetail=x=>x.achievementStatus==='Bekliyor'?`${date(x.start)} tarihinde başlayacak`:(x.achievementStatus==='Devam ediyor'?`${date(x.end)} tarihine kadar`:(x.achievementStatus==='Hedef tamamlanmadı'?`${date(x.end)} tarihinde kapandı`:'Hedef karşılandı'));
+  const actions=x=>admin?`<td><div class="row-actions"><button class="btn tiny" onclick="editReferenceTargetModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny ${x.active?'danger':'secondary'}" onclick="toggleReferenceTarget('${esc(x.id)}',${!x.active})">${x.active?'Pasif':'Aktif'}</button><button class="btn tiny danger" onclick="removeReferenceTarget('${esc(x.id)}')">Sil</button></div></td>`:'';
+  const rows=items.map(x=>`<tr><td>${esc(x.reference)}</td><td>${date(x.start)} - ${date(x.end)}</td><td class="money">${money(x.pledgeTarget)}</td><td class="money">${money(x.actualPledged)}</td><td>${(x.pledgeRate*100).toFixed(1)}%</td><td class="money">${money(x.collectionTarget)}</td><td class="money">${money(x.actualCollected)}</td><td class="money"><strong>${money(Number(x.actualPledged)+Number(x.actualCollected))}</strong></td><td>${(x.collectionRate*100).toFixed(1)}%</td><td><div class="target-status-cell"><span class="status ${achievementClass(x)}">${esc(x.achievementStatus||'')}</span><small>${esc(achievementDetail(x))}</small></div></td><td><span class="status ${x.active?'green':'red'}">${x.active?'Aktif':'Pasif'}</span></td>${actions(x)}</tr>`);
+  const periodOptions=periodKeys.map(v=>`<option value="${esc(v)}" ${state.targetPeriod===v?'selected':''}>${esc(staffMonthLabel(v))}</option>`).join('');
+  const sort=`<div class="target-toolbar"><label>Hedef dönemi<select id="targetPeriod" onchange="setTargetPeriod(this.value)"><option value="">Tüm dönemler</option>${periodOptions}</select></label><label>Sıralama<select id="targetSort" onchange="setTargetSort(this.value)"><option value="collection-rate" ${state.targetSort==='collection-rate'?'selected':''}>Tahsilat yüzdesi</option><option value="pledge-rate" ${state.targetSort==='pledge-rate'?'selected':''}>Teberru yüzdesi</option><option value="combined-actual" ${state.targetSort==='combined-actual'?'selected':''}>Teberru + tahsilat toplamı</option><option value="collection-actual" ${state.targetSort==='collection-actual'?'selected':''}>Tahsilat toplamı</option><option value="pledge-actual" ${state.targetSort==='pledge-actual'?'selected':''}>Teberru toplamı</option><option value="collection-target" ${state.targetSort==='collection-target'?'selected':''}>Tahsilat hedefi</option><option value="pledge-target" ${state.targetSort==='pledge-target'?'selected':''}>Teberru hedefi</option><option value="name" ${state.targetSort==='name'?'selected':''}>Referans A-Z</option></select></label><button class="btn secondary" onclick="downloadReferenceTargetsPdf()">PDF indir</button></div>`;
+  const headers=['Referans','Dönem','Teberru Hedefi','Teberru','Teberru %','Tahsilat Hedefi','Tahsilat','Teberru + Tahsilat','Tahsilat %','Hedef Durumu','Kayıt'];if(admin)headers.push('İşlem');
+  const active=visibleTargets.filter(x=>x.active);const s=active.reduce((a,x)=>{a.pledgeTarget+=Number(x.pledgeTarget)||0;a.actualPledged+=Number(x.actualPledged)||0;a.collectionTarget+=Number(x.collectionTarget)||0;a.actualCollected+=Number(x.actualCollected)||0;return a},{pledgeTarget:0,actualPledged:0,collectionTarget:0,actualCollected:0});s.totalTarget=s.pledgeTarget+s.collectionTarget;s.totalActual=s.actualPledged+s.actualCollected;s.totalRate=s.totalTarget?s.totalActual/s.totalTarget:0;
+  const summary=cards([['Teberru hedefi',money(s.pledgeTarget)],['Gerçekleşen teberru',money(s.actualPledged)],['Tahsilat hedefi',money(s.collectionTarget)],['Toplam tahsilat',money(s.actualCollected)],['Toplam hedef',money(s.totalTarget)],['Teberru + tahsilat',money(s.totalActual)],['Genel gerçekleşme','%'+(s.totalRate*100).toFixed(1)]]);
+  const targetActions=admin?'<div class="actions"><button class="btn secondary" onclick="bulkReferenceTargetModal()">Toplu hedef ver</button><button class="btn secondary" onclick="copyReferenceTargetsModal()">Ayı devret</button><button class="btn primary" onclick="referenceTargetModal()">Yeni hedef</button></div>':'';
+  $('#content').innerHTML=summary+panel('Teberru ve tahsilat hedefleri',tabs+sort+table(headers,rows,state.targetPeriod?'Bu hedef döneminde kayıt bulunamadı.':'Henüz hedef tanımlanmadı.'),targetActions);
+}
+function setReferenceTab(tab){state.referenceTab=tab;renderReferences()}
+function setReferenceSource(source){state.referenceSource=source;state.targetPeriod=null;state.targetSort='collection-rate';renderReferences()}
+function setTargetSort(sort){state.targetSort=sort;renderReferences()}
+function setTargetPeriod(period){state.targetPeriod=period;renderReferences()}
+function referenceTargetFields(x={}){
+  const refs=(state.data.referenceNames||[]).slice();if(x.reference&&!refs.includes(x.reference))refs.unshift(x.reference);
+  const refField=refs.length?selectField('Referans','fTargetReference',refs):inputField('Referans','fTargetReference','text',false,`value="${esc(x.reference||'')}"`);
+  return refField+inputField('Başlangıç','fTargetStart','date',false,`value="${x.start||new Date().getFullYear()+'-01-01'}"`)+inputField('Bitiş','fTargetEnd','date',false,`value="${x.end||new Date().getFullYear()+'-12-31'}"`)+inputField('Teberru hedefi','fPledgeTarget','number',false,`min="0" step="0.01" value="${x.pledgeTarget||0}"`)+inputField('Tahsilat hedefi','fCollectionTarget','number',false,`min="0" step="0.01" value="${x.collectionTarget||0}"`)+inputField('Açıklama','fTargetNote','text',true,`value="${esc(x.note||'')}"`);
+}
+function referenceTargetType(){return 'TAHSİLAT'}
+function referenceTargetModal(){showModal('Yeni teberru ve tahsilat hedefi',formHtml(referenceTargetFields(),'submitReferenceTarget()'))}
+function bulkReferenceTargetModal(){
+  const refs=(state.data.referenceNames||[]).slice().sort((a,b)=>a.localeCompare(b,'tr'));if(!refs.length){toast('Toplu hedef verilecek referans bulunamadı.',true);return;}
+  const picker=`<fieldset class="wide check-field bulk-target-checks"><legend>Referanslar</legend><div class="bulk-target-tools"><button class="btn tiny secondary" type="button" onclick="toggleBulkTargetReferences(true)">Tümünü seç</button><button class="btn tiny" type="button" onclick="toggleBulkTargetReferences(false)">Seçimi temizle</button><span id="bulkTargetReferenceCount">0 referans seçildi</span></div><div id="bulkTargetReferences" class="check-grid">${refs.map(name=>`<label class="check-item"><input type="checkbox" value="${esc(name)}" onchange="updateBulkTargetReferenceCount()"><span>${esc(name)}</span></label>`).join('')}</div></fieldset>`;
+  showModal('Toplu teberru ve tahsilat hedefi',formHtml(inputField('Hedef ayı','fBulkTargetMonth','month',false,`value="${currentMonthValue()}"`)+inputField('Her referans için teberru hedefi','fBulkPledgeTarget','number',false,'min="0" step="0.01" value="0"')+inputField('Her referans için tahsilat hedefi','fBulkCollectionTarget','number',false,'min="0" step="0.01" value="0"')+picker+inputField('Ortak açıklama','fBulkTargetNote','text',true),'submitBulkReferenceTargets()'));
+}
+function toggleBulkTargetReferences(checked){document.querySelectorAll('#bulkTargetReferences input[type="checkbox"]').forEach(x=>x.checked=checked);updateBulkTargetReferenceCount()}
+function updateBulkTargetReferenceCount(){const count=document.querySelectorAll('#bulkTargetReferences input[type="checkbox"]:checked').length;const el=$('#bulkTargetReferenceCount');if(el)el.textContent=count+' referans seçildi'}
+async function submitBulkReferenceTargets(){
+  const references=[...document.querySelectorAll('#bulkTargetReferences input[type="checkbox"]:checked')].map(x=>x.value);if(!references.length){toast('En az bir referans seçin.',true);return;}
+  const r=await submit('saveBulkReferenceTargets',{targetType:referenceTargetType(),month:$('#fBulkTargetMonth').value,pledgeTarget:$('#fBulkPledgeTarget')?.value||0,collectionTarget:$('#fBulkCollectionTarget').value,references:references,note:$('#fBulkTargetNote').value});if(r)toast(`${r.period}: ${r.created} hedef oluşturuldu, ${r.skipped} mevcut kayıt atlandı.`);
+}
+function copyReferenceTargetsModal(){showModal('Teberru ve tahsilat hedeflerini aya devret',formHtml(inputField('Kaynak ay','fTargetSourceMonth','month',false,`value="${currentMonthValue(-1)}"`)+inputField('Hedef ay','fTargetDestinationMonth','month',false,`value="${currentMonthValue()}"`)+`<div class="wide carry-note"><strong>Devredilen hedefler yeni ve bağımsız kayıtlardır.</strong><span>Kaynak dönemin sonuçları korunur. Yeni ayın hedeflerini daha sonra satırdaki Düzelt düğmesiyle değiştirebilirsiniz.</span></div>`,'submitCopyReferenceTargets()'))}
+async function submitCopyReferenceTargets(){const r=await submit('copyReferenceTargetsMonth',{targetType:referenceTargetType(),sourceMonth:$('#fTargetSourceMonth').value,targetMonth:$('#fTargetDestinationMonth').value});if(r)toast(`${r.sourcePeriod} → ${r.targetPeriod}: ${r.created} hedef devredildi, ${r.skipped} mevcut kayıt atlandı.`)}
+function editReferenceTargetModal(id){const x=(state.data.referenceTargets?.items||[]).find(r=>r.id===id);if(!x)return;showModal('Referans hedefini düzelt',formHtml(referenceTargetFields(x),`submitReferenceTargetEdit('${esc(id)}')`));$('#fTargetReference').value=x.reference}
+function referenceTargetPayload(id=''){return {id:id,targetType:referenceTargetType(),reference:$('#fTargetReference').value,start:$('#fTargetStart').value,end:$('#fTargetEnd').value,pledgeTarget:$('#fPledgeTarget')?.value||0,collectionTarget:$('#fCollectionTarget').value,note:$('#fTargetNote').value}}
+async function submitReferenceTarget(){await submit('saveReferenceTarget',referenceTargetPayload())}
+async function submitReferenceTargetEdit(id){await submit('updateReferenceTarget',referenceTargetPayload(id))}
+async function toggleReferenceTarget(id,active){if(!confirm(active?'Hedef aktif yapılsın mı?':'Hedef pasif yapılsın mı?'))return;await submit('setReferenceTargetActive',id,active)}
+async function removeReferenceTarget(id){if(!confirm('Bu referans hedefi silinsin mi?'))return;await submit('deleteReferenceTarget',id)}
+async function downloadReferenceTargetsPdf(){setBusy(true);try{const r=await server('generateReferenceTargetsPdf',state.token,state.targetSort,state.targetPeriod,referenceTargetType());downloadBase64File(r);toast('Teberru ve tahsilat hedef raporu indirildi.')}catch(e){toast(e.message,true)}finally{setBusy(false)}}
+function downloadBase64File(r){const bytes=Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0));const blob=new Blob([bytes],{type:r.mimeType});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=r.fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)}
+function renderCash(){
+  heading('Kasa / Banka','Gelirler, personel ve öğretmen ödemeleri, cari ödemeler ve fiş giderlerinin net bakiyesi');
+  const admin=state.data.user.role==='YÖNETİCİ';
+  const cash=state.data.cash||{accounts:[],totalBalance:0,totalCollected:0};
+  const rows=[...cash.accounts].sort((a,b)=>b.balance-a.balance).map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td class="money">${money(x.openingBalance)}</td><td class="money income-cell">${money(x.collected)}</td><td class="money finance-cell">${money(x.borrowed)}</td><td class="money expense-cell">${money(x.staffExpense)}</td><td class="money expense-cell">${money(x.teacherExpense)}</td><td class="money expense-cell">${money(x.currentExpense)}</td><td class="money expense-cell">${money(x.receiptExpense)}</td><td class="money expense-cell">${money(x.debtRepaid)}</td><td class="money">${money(x.balance)}</td><td><span class="status ${x.active?'green':'red'}">${x.active?'Aktif':'Pasif'}</span></td>${admin?`<td><div class="row-actions"><button class="btn tiny" onclick="editCashAccountModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny ${x.active?'danger':'secondary'}" onclick="toggleCashAccount('${esc(x.id)}',${!x.active})">${x.active?'Pasif':'Aktif'}</button></div></td>`:''}</tr>`);
+  const headers=['Hesap','Tür','Açılış','Tahsilat','Borç Alımı','Personel','Öğretmen','Cari','Fiş','Borç Ödeme','Net Bakiye','Durum'];if(admin)headers.push('İşlem');
+  const actions=admin?'<div class="actions"><button class="btn secondary" onclick="runSystemMaintenance()">Bakiyeleri doğrula</button><button class="btn primary" onclick="cashAccountModal()">Yeni hesap</button></div>':'';
+  $('#content').innerHTML=cards([['Tahsilat geliri',money(cash.totalCollected)],['Borç girişi',money(cash.totalBorrowed)],['Toplam çıkış',money(cash.totalExpense)],['Net kasa / banka',money(cash.totalBalance)]])+panel('Gelir - gider ve finansman hesapları',table(headers,rows),actions);
+}
+function cashAccountModal(){
+  const fields=inputField('Hesap adı','fCashName')+selectField('Hesap türü','fCashType',['KASA','BANKA','POS','DİĞER'])+inputField('Açılış bakiyesi','fCashOpening','number',false,'min="0" step="0.01" value="0"')+inputField('Açıklama','fCashNote','text',true);
+  showModal('Yeni kasa / banka hesabı',formHtml(fields,'submitCashAccount()'));
+}
+async function submitCashAccount(){await submit('saveCashAccount',{name:$('#fCashName').value,type:$('#fCashType').value,openingBalance:$('#fCashOpening').value,note:$('#fCashNote').value})}
+function editCashAccountModal(id){const x=(state.data.cash?.accounts||[]).find(r=>r.id===id);if(!x)return;showModal('Kasa / banka hesabını düzelt',formHtml(inputField('Hesap adı','fCashName','text',false,`value="${esc(x.name)}"`)+selectField('Hesap türü','fCashType',['KASA','BANKA','POS','DİĞER'])+inputField('Açılış bakiyesi','fCashOpening','number',false,`min="0" step="0.01" value="${x.openingBalance}"`)+inputField('Açıklama','fCashNote','text',true,`value="${esc(x.note||'')}"`),`submitCashAccountEdit('${esc(id)}')`));$('#fCashType').value=x.type}
+async function submitCashAccountEdit(id){await submit('updateCashAccount',{id:id,name:$('#fCashName').value,type:$('#fCashType').value,openingBalance:$('#fCashOpening').value,note:$('#fCashNote').value})}
+async function runSystemMaintenance(){if(!confirm('Taahhüt, tahakkuk, cari ve borç bakiyeleri hareketlerden yeniden hesaplansın mı?'))return;setBusy(true);try{const r=await server('reconcileSystem',state.token);const c=r.counts;alert(`Doğrulama tamamlandı.\nTaahhüt: ${c.pledges}\nPersonel tahakkuku: ${c.staff}\nÖğretmen tahakkuku: ${c.teachers}\nCari gider: ${c.currentExpenses||0}\nBorç: ${c.loans}`+(r.negativeAccounts.length?'\n\nDikkat: Eksi hesaplar: '+r.negativeAccounts.map(x=>x.name+' '+money(x.balance)).join(', '):'\n\nEksi hesap bulunmadı.'));scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}}
+async function toggleCashAccount(id,active){if(!active&&!confirm('Bu hesap yeni tahsilat girişlerine kapatılsın mı? Mevcut bakiye korunur.'))return;await submit('setCashAccountActive',id,active)}
+
+function renderGeneralExpenses(){
+  heading('Giderler','Cari ödemeleri ve fiş giderlerini kasa / banka hesaplarıyla birlikte takip edin');
+  const d=state.data.generalExpenses||{current:[],payments:[],receipts:[],currentTypes:[],receiptTypes:[],summary:{}};const s=d.summary||{};
+  const tabs=`<div class="tabs"><button class="tab ${state.generalExpenseTab==='current'?'active':''}" onclick="setGeneralExpenseTab('current')">Cari Ödemeler</button><button class="tab ${state.generalExpenseTab==='receipts'?'active':''}" onclick="setGeneralExpenseTab('receipts')">Fiş Giderleri</button></div>`;
+  let body='';let action='';
+  if(state.generalExpenseTab==='current'){
+    const paged=pageData('general-current',[...d.current].sort((a,b)=>String(b.year).localeCompare(String(a.year))||a.name.localeCompare(b.name,'tr')));
+    const rows=paged.items.map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.year)}</td><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td class="money">${money(x.amount)}</td><td class="money">${money(x.paid)}</td><td class="money">${money(x.remaining)}</td><td><span class="status ${statusClass(x.status)}">${esc(x.status)}</span></td><td><div class="row-actions">${x.remaining>0?`<button class="btn tiny primary" onclick="currentExpensePaymentModal('${esc(x.id)}')">Ödeme yap</button>`:''}<button class="btn tiny" onclick="editCurrentExpenseModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeCurrentExpense('${esc(x.id)}')">Sil</button></div></td></tr>`);
+    const paymentRows=[...d.payments].sort((a,b)=>b.date.localeCompare(a.date)).map(x=>`<tr><td>${esc(x.id)}</td><td>${date(x.date)}</td><td>${esc(x.currentId)}</td><td>${esc(x.name)}</td><td class="money">${money(x.amount)}</td><td>${esc(x.method)}</td><td>${esc(x.accountName)}</td><td><div class="row-actions"><button class="btn tiny" onclick="editCurrentExpensePaymentModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeCurrentExpensePayment('${esc(x.id)}')">Sil</button></div></td></tr>`);
+    body=table(['Cari No','Cari Yılı','Cari Adı','Nevi','Tutar','Ödenen','Kalan','Durum','İşlem'],rows,'Henüz cari gider kaydı yok.')+paged.controls+panel('Cari ödeme hareketleri',table(['Hareket No','Tarih','Cari No','Cari Adı','Tutar','Ödeme Şekli','Kasa / Banka','İşlem'],paymentRows,'Henüz cari ödeme hareketi yok.'));
+    action='<div class="actions"><button class="btn secondary" onclick="currentExpensePaymentModal()">Ödeme yap</button><button class="btn primary" onclick="currentExpenseModal()">Cari ekle</button></div>';
+  }else{
+    const paged=pageData('general-receipts',[...d.receipts].sort((a,b)=>b.date.localeCompare(a.date)));
+    const rows=paged.items.map(x=>`<tr><td>${esc(x.id)}</td><td>${date(x.date)}</td><td>${esc(x.name)}</td><td>${esc(x.type)}</td><td class="money">${money(x.amount)}</td><td>${esc(x.method)}</td><td>${esc(x.accountName)}</td><td><div class="row-actions"><button class="btn tiny" onclick="editReceiptExpenseModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeReceiptExpense('${esc(x.id)}')">Sil</button></div></td></tr>`);
+    body=table(['Gider No','Tarih','Gider Adı','Gider Türü','Miktarı','Ödeme Şekli','Kasa / Banka','İşlem'],rows,'Henüz fiş gideri yok.')+paged.controls;
+    action='<button class="btn primary" onclick="receiptExpenseModal()">Fiş gideri ekle</button>';
+  }
+  $('#content').innerHTML=cards([['Cari toplamı',money(s.currentTotal)],['Cari ödenen',money(s.currentPaid)],['Cari kalan',money(s.currentRemaining)],['Fiş giderleri',money(s.receiptTotal)],['Toplam gider',money((Number(s.currentPaid)||0)+(Number(s.receiptTotal)||0))]])+panel('Gider kayıtları',tabs+body,action);
+}
+function setGeneralExpenseTab(tab){state.generalExpenseTab=tab;resetPage(tab==='current'?'general-current':'general-receipts');renderGeneralExpenses()}
+function customTypeField(label,id,items,value=''){const list=id+'Options';return `<label>${esc(label)}<input id="${id}" list="${list}" value="${esc(value)}" autocomplete="off" placeholder="Seçin veya yeni tür yazın"><datalist id="${list}">${(items||[]).map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist></label>`}
+function generalExpenseAccounts(selectedId=''){return (state.data.cash?.accounts||[]).filter(x=>(x.active||x.id===selectedId)&&['KASA','BANKA'].includes(String(x.type).toUpperCase())).map(x=>({value:x.id,label:x.name+' · '+money(x.balance)}))}
+function ensureGeneralExpenseAccount(selectedId=''){const accounts=generalExpenseAccounts(selectedId);if(!accounts.length){toast('Ödeme için aktif Nakit Kasa veya Banka hesabı oluşturun.',true);return null}return accounts}
+function currentExpenseFields(x={}){const d=state.data.generalExpenses||{};return inputField('Cari yılı','fCurrentYear','number',false,`min="1900" max="2100" value="${esc(x.year||new Date().getFullYear())}"`)+inputField('Cari adı','fCurrentName','text',false,`value="${esc(x.name||'')}"`)+customTypeField('Nevi','fCurrentType',d.currentTypes||[],x.type||'')+inputField('Tutar','fCurrentAmount','number',false,`min="0.01" step="0.01" value="${x.amount||''}"`)+inputField('Açıklama','fCurrentNote','text',true,`value="${esc(x.note||'')}"`)}
+function currentExpenseModal(){showModal('Cari gider ekle',formHtml(currentExpenseFields(),'submitCurrentExpense()'))}
+function editCurrentExpenseModal(id){const x=(state.data.generalExpenses?.current||[]).find(r=>r.id===id);if(!x)return;showModal('Cari gideri düzelt',formHtml(currentExpenseFields(x),`submitCurrentExpenseEdit('${esc(id)}')`))}
+function currentExpensePayload(id=''){return {id:id,year:$('#fCurrentYear').value,name:$('#fCurrentName').value,type:$('#fCurrentType').value,amount:$('#fCurrentAmount').value,note:$('#fCurrentNote').value}}
+async function submitCurrentExpense(){await submit('saveCurrentExpense',currentExpensePayload())}
+async function submitCurrentExpenseEdit(id){await submit('updateCurrentExpense',currentExpensePayload(id))}
+async function removeCurrentExpense(id){if(!confirm('Bu cari gider kaydı silinsin mi? Bağlı ödeme varsa önce ödeme hareketlerini silmeniz gerekir.'))return;await submit('deleteCurrentExpense',id)}
+function currentExpensePaymentModal(preselectedId=''){
+  const open=(state.data.generalExpenses?.current||[]).filter(x=>x.remaining>0);const selected=open.find(x=>x.id===preselectedId);if(!open.length){toast('Ödenecek açık cari kaydı bulunmuyor.',true);return}const accounts=ensureGeneralExpenseAccount();if(!accounts)return;
+  const picker=selected?`<div class="wide selected-pledge-summary"><strong>${esc(selected.name)}</strong><span>${esc(selected.type)} · Kalan: ${money(selected.remaining)}</span><input id="currentExpensePickerSelected" type="hidden" value="${esc(selected.id)}"></div>`:searchPickerHtml('currentExpensePicker',open,x=>`<strong>${esc(x.name)}</strong><span>${esc(x.year)} · ${esc(x.type)} · Kalan: ${money(x.remaining)}</span>`);
+  showModal('Cari ödeme yap',formHtml(picker+inputField('Ödeme tutarı','fCurrentPaymentAmount','number',false,'min="0.01" step="0.01"')+inputField('Ödeme tarihi','fCurrentPaymentDate','date',false,`value="${new Date().toISOString().slice(0,10)}"`)+selectValueField('Ödeme hesabı','fCurrentPaymentAccount',accounts)+inputField('Açıklama','fCurrentPaymentNote','text',true),'submitCurrentExpensePayment()'));
+}
+async function submitCurrentExpensePayment(){const id=$('#currentExpensePickerSelected').value;if(!id){toast('Arama sonucundan bir cari kaydı seçin.',true);return}await submit('saveCurrentExpensePayment',{currentId:id,amount:$('#fCurrentPaymentAmount').value,date:$('#fCurrentPaymentDate').value,accountId:$('#fCurrentPaymentAccount').value,note:$('#fCurrentPaymentNote').value})}
+function editCurrentExpensePaymentModal(id){const x=(state.data.generalExpenses?.payments||[]).find(r=>r.id===id);if(!x)return;const accounts=ensureGeneralExpenseAccount(x.accountId);if(!accounts)return;showModal('Cari ödemeyi düzelt',formHtml(inputField('Ödeme tutarı','fCurrentPaymentAmount','number',false,`min="0.01" step="0.01" value="${x.amount}"`)+inputField('Ödeme tarihi','fCurrentPaymentDate','date',false,`value="${x.date}"`)+selectValueField('Ödeme hesabı','fCurrentPaymentAccount',accounts)+inputField('Açıklama','fCurrentPaymentNote','text',true,`value="${esc(x.note||'')}"`),`submitCurrentExpensePaymentEdit('${esc(id)}')`));$('#fCurrentPaymentAccount').value=x.accountId}
+async function submitCurrentExpensePaymentEdit(id){await submit('updateCurrentExpensePayment',{id:id,amount:$('#fCurrentPaymentAmount').value,date:$('#fCurrentPaymentDate').value,accountId:$('#fCurrentPaymentAccount').value,note:$('#fCurrentPaymentNote').value})}
+async function removeCurrentExpensePayment(id){if(!confirm('Bu cari ödeme hareketi silinsin mi? Cari kalan tutarı ve kasa/banka bakiyesi yeniden hesaplanacaktır.'))return;await submit('deleteCurrentExpensePayment',id)}
+function receiptExpenseFields(x={}){const d=state.data.generalExpenses||{};const accounts=ensureGeneralExpenseAccount(x.accountId);if(!accounts)return null;return inputField('Tarih','fReceiptDate','date',false,`value="${x.date||new Date().toISOString().slice(0,10)}"`)+inputField('Gider adı','fReceiptName','text',false,`value="${esc(x.name||'')}"`)+customTypeField('Gider türü','fReceiptType',d.receiptTypes||[],x.type||'')+inputField('Miktarı','fReceiptAmount','number',false,`min="0.01" step="0.01" value="${x.amount||''}"`)+selectValueField('Ödeme şekli / hesap','fReceiptAccount',accounts)+inputField('Açıklama','fReceiptNote','text',true,`value="${esc(x.note||'')}"`)}
+function receiptExpenseModal(){const fields=receiptExpenseFields();if(fields)showModal('Fiş gideri ekle',formHtml(fields,'submitReceiptExpense()'))}
+function editReceiptExpenseModal(id){const x=(state.data.generalExpenses?.receipts||[]).find(r=>r.id===id);if(!x)return;const fields=receiptExpenseFields(x);if(!fields)return;showModal('Fiş giderini düzelt',formHtml(fields,`submitReceiptExpenseEdit('${esc(id)}')`));$('#fReceiptAccount').value=x.accountId}
+function receiptExpensePayload(id=''){return {id:id,date:$('#fReceiptDate').value,name:$('#fReceiptName').value,type:$('#fReceiptType').value,amount:$('#fReceiptAmount').value,accountId:$('#fReceiptAccount').value,note:$('#fReceiptNote').value}}
+async function submitReceiptExpense(){await submit('saveReceiptExpense',receiptExpensePayload())}
+async function submitReceiptExpenseEdit(id){await submit('updateReceiptExpense',receiptExpensePayload(id))}
+async function removeReceiptExpense(id){if(!confirm('Bu fiş gideri silinsin mi? Kasa/banka bakiyesi buna göre yeniden oluşacaktır.'))return;await submit('deleteReceiptExpense',id)}
+
+function renderDebts(){
+  heading('Borç yönetimi','Alınan borçların kasa girişini ve geri ödemelerini takip edin');
+  const d=state.data.debts||{loans:[],repayments:[],summary:{borrowed:0,repaid:0,remaining:0}};
+  const tabs=`<div class="tabs"><button class="tab ${state.debtTab==='loans'?'active':''}" onclick="setDebtTab('loans')">Alınan borçlar</button><button class="tab ${state.debtTab==='repayments'?'active':''}" onclick="setDebtTab('repayments')">Geri ödemeler</button></div>`;
+  let body,action;
+  if(state.debtTab==='loans'){
+    const paged=pageData('debt-loans',[...d.loans].sort((a,b)=>b.amount-a.amount));
+    const rows=paged.items.map(x=>`<tr><td>${esc(x.id)}</td><td>${date(x.date)}</td><td>${esc(x.lender)}</td><td>${esc(x.accountName)}</td><td class="money">${money(x.amount)}</td><td class="money">${money(x.repaid)}</td><td class="money">${money(x.remaining)}</td><td><span class="status ${statusClass(x.status)}">${esc(x.status)}</span></td><td><div class="row-actions">${x.remaining>0?`<button class="btn tiny primary" onclick="loanRepaymentModal('${esc(x.id)}')">Geri ödeme</button>`:''}<button class="btn tiny" onclick="editLoanModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeLoan('${esc(x.id)}')">Sil</button></div></td></tr>`);
+    body=table(['Borç No','Tarih','Borç Veren','Giriş Hesabı','Alınan','Ödenen','Kalan','Durum','İşlem'],rows,'Henüz borç alımı yok.')+paged.controls;
+    action='<button class="btn primary" onclick="loanModal()">Borç alımı ekle</button>';
+  }else{
+    const paged=pageData('debt-repayments',[...d.repayments].sort((a,b)=>b.amount-a.amount));
+    const rows=paged.items.map(x=>`<tr><td>${esc(x.id)}</td><td>${date(x.date)}</td><td>${esc(x.loanId)}</td><td>${esc(x.lender)}</td><td class="money">${money(x.amount)}</td><td>${esc(x.accountName)}</td><td>${esc(x.method)}</td><td><div class="row-actions"><button class="btn tiny" onclick="editLoanRepaymentModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeLoanRepayment('${esc(x.id)}')">Sil</button></div></td></tr>`);
+    body=table(['Hareket No','Tarih','Borç No','Borç Veren','Tutar','Çıkış Hesabı','Yöntem','İşlem'],rows,'Henüz borç geri ödemesi yok.')+paged.controls;
+    action='<button class="btn primary" onclick="loanRepaymentModal()">Geri ödeme ekle</button>';
+  }
+  $('#content').innerHTML=cards([['Toplam alınan borç',money(d.summary.borrowed)],['Toplam geri ödeme',money(d.summary.repaid)],['Kalan borç',money(d.summary.remaining)]])+panel('Borç hareketleri',tabs+body,action);
+}
+function setDebtTab(tab){state.debtTab=tab;resetPage('debt-'+tab);renderDebts()}
+function loanModal(){
+  const accounts=((state.data.cash&&state.data.cash.accounts)||[]).filter(x=>x.active).map(x=>({value:x.id,label:x.name+' · '+money(x.balance)}));
+  showModal('Borç alımı ekle',formHtml(inputField('Borç veren kişi / kurum','fLender')+inputField('Alınan tutar','fAmount','number',false,'min="0.01" step="0.01"')+inputField('Alım tarihi','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}"`)+selectValueField('Paranın gireceği kasa / banka','fAccount',accounts)+inputField('Açıklama','fNote','text',true),'submitLoan()'));
+}
+async function submitLoan(){await submit('saveLoan',{lender:$('#fLender').value,amount:$('#fAmount').value,date:$('#fDate').value,accountId:$('#fAccount').value,note:$('#fNote').value})}
+function editLoanModal(id){const x=(state.data.debts?.loans||[]).find(r=>r.id===id);if(!x)return;const accounts=(state.data.cash?.accounts||[]).filter(a=>a.active||a.id===x.accountId).map(a=>({value:a.id,label:a.name+' · '+money(a.balance)}));showModal('Borç alımını düzelt',formHtml(inputField('Borç veren kişi / kurum','fLender','text',false,`value="${esc(x.lender)}"`)+inputField('Alınan tutar','fAmount','number',false,`min="${x.repaid||0.01}" step="0.01" value="${x.amount}"`)+inputField('Alım tarihi','fDate','date',false,`value="${x.date}"`)+selectValueField('Paranın girdiği kasa / banka','fAccount',accounts)+inputField('Açıklama','fNote','text',true,`value="${esc(x.note||'')}"`),`submitLoanEdit('${esc(id)}')`));$('#fAccount').value=x.accountId}
+async function submitLoanEdit(id){await submit('updateLoan',{id:id,lender:$('#fLender').value,amount:$('#fAmount').value,date:$('#fDate').value,accountId:$('#fAccount').value,note:$('#fNote').value})}
+function loanRepaymentModal(preselectedId=''){
+  const open=(state.data.debts?.loans||[]).filter(x=>x.remaining>0);
+  const selected=open.find(x=>x.id===preselectedId);
+  const picker=selected?`<div class="wide selected-pledge-summary"><strong>${esc(selected.lender)}</strong><span>Borç No: ${esc(selected.id)} · Kalan: ${money(selected.remaining)}</span><input id="loanPickerSelected" type="hidden" value="${esc(selected.id)}"></div>`:searchPickerHtml('loanPicker',open,x=>`<strong>${esc(x.lender)}</strong><span>${esc(x.id)} · Kalan: ${money(x.remaining)}</span>`);
+  const accounts=((state.data.cash&&state.data.cash.accounts)||[]).filter(x=>x.active).map(x=>({value:x.id,label:x.name+' · '+money(x.balance)}));
+  showModal('Borç geri ödemesi',formHtml(picker+inputField('Ödeme tutarı','fAmount','number',false,'min="0.01" step="0.01"')+inputField('Ödeme tarihi','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}"`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+selectValueField('Paranın çıkacağı kasa / banka','fAccount',accounts)+inputField('Açıklama','fNote','text',true),'submitLoanRepayment()'));
+}
+async function submitLoanRepayment(){const id=$('#loanPickerSelected').value;if(!id){toast('Arama sonucundan bir borç kaydı seçin.',true);return;}await submit('saveLoanRepayment',{loanId:id,amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value})}
+function editLoanRepaymentModal(id){const x=(state.data.debts?.repayments||[]).find(r=>r.id===id);if(!x)return;const accounts=(state.data.cash?.accounts||[]).filter(a=>a.active||a.id===x.accountId).map(a=>({value:a.id,label:a.name+' · '+money(a.balance)}));showModal('Borç geri ödemesini düzelt',formHtml(inputField('Tutar','fAmount','number',false,`min="0.01" step="0.01" value="${x.amount}"`)+inputField('Ödeme tarihi','fDate','date',false,`value="${x.date}"`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+selectValueField('Paranın çıktığı kasa / banka','fAccount',accounts)+inputField('Açıklama','fNote','text',true,`value="${esc(x.note||'')}"`),`submitLoanRepaymentEdit('${esc(id)}')`));$('#fMethod').value=x.method;$('#fAccount').value=x.accountId}
+async function submitLoanRepaymentEdit(id){await submit('updateLoanRepayment',{id:id,amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value})}
+async function removeLoan(id){if(!confirm('Bu borç kaydı silinsin mi? Kasa bakiyesi de buna göre azalacaktır.'))return;await submit('deleteLoan',id)}
+async function removeLoanRepayment(id){if(!confirm('Bu borç geri ödeme hareketi silinsin mi?'))return;await submit('deleteLoanRepayment',id)}
+function staffScopeKey(x){return normalizeSearch(x.paymentType)+'|'+normalizeSearch(x.period)}
+function staffScopeOptions(){
+  const map={};(state.data.staff?.commitments||[]).forEach(x=>{const key=staffScopeKey(x);const item=map[key]||(map[key]={key:key,paymentType:x.paymentType||'Belirtilmemiş',period:x.period||'Dönemsiz',count:0,total:0});item.count++;item.total+=Number(x.total)||0});
+  return Object.values(map).sort((a,b)=>a.paymentType.localeCompare(b.paymentType,'tr')||staffPeriodSort(b.period)-staffPeriodSort(a.period)||b.period.localeCompare(a.period,'tr'));
+}
+function staffScopedCommitments(){const all=[...(state.data.staff?.commitments||[])];if(!state.staffSummaryScope.length)return all;const selected=new Set(state.staffSummaryScope);return all.filter(x=>selected.has(staffScopeKey(x)))}
+function staffScopeSummary(d,commitments){
+  if(!state.staffSummaryScope.length)return d.summary;
+  const ids=new Set(commitments.map(x=>x.id));const start=String(state.data.filters?.start||'');const end=String(state.data.filters?.end||'');
+  const period=(d.payments||[]).filter(x=>ids.has(x.commitmentId)&&(!start||x.date>=start)&&(!end||x.date<=end)).reduce((s,x)=>s+(Number(x.amount)||0),0);
+  return {total:commitments.reduce((s,x)=>s+(Number(x.total)||0),0),paid:commitments.reduce((s,x)=>s+(Number(x.paid)||0),0),remaining:commitments.reduce((s,x)=>s+(Number(x.remaining)||0),0),period:period};
+}
+function staffScopeToolbar(commitments){
+  const active=state.staffSummaryScope.length>0;const text=active?`${state.staffSummaryScope.length} tür/dönem seçili · ${commitments.length} tahakkuk`:`Tüm tür ve dönemler · ${commitments.length} tahakkuk`;
+  return `<div class="staff-scope-bar"><div><strong>Toplam ve ödeme kapsamı</strong><span>${esc(text)}</span></div><div class="actions"><button class="btn secondary" onclick="staffScopeModal()">Tür / dönem seç</button>${active?'<button class="btn" onclick="clearStaffScope()">Tümünü göster</button>':''}</div></div>`;
+}
+function staffScopeModal(){
+  const options=staffScopeOptions();if(!options.length){toast('Seçilebilecek personel tahakkuku bulunamadı.',true);return;}const selected=new Set(state.staffSummaryScope);const all=!selected.size;
+  const periods=[...new Set(options.map(x=>x.period))].sort((a,b)=>staffPeriodSort(b)-staffPeriodSort(a)||b.localeCompare(a,'tr'));
+  const activePeriod=Math.max(0,periods.findIndex(period=>options.some(x=>x.period===period&&selected.has(x.key))));
+  const monthTabs=periods.map((period,i)=>`<button class="staff-scope-month ${i===activePeriod?'active':''}" type="button" onclick="showStaffScopeMonth(${i})"><strong>${esc(staffMonthLabel(period))}</strong><span>${options.filter(x=>x.period===period).length} kalem</span></button>`).join('');
+  const panels=periods.map((period,i)=>`<div class="staff-scope-month-panel ${i===activePeriod?'':'hidden'}" data-month-index="${i}"><div class="staff-scope-month-tools"><button class="btn tiny primary" type="button" onclick="selectOnlyStaffScopeMonth(${i})">Yalnız bu ay</button><button class="btn tiny secondary" type="button" onclick="toggleStaffScopeMonth(${i},true)">Bu ayın tümünü seç</button><button class="btn tiny" type="button" onclick="toggleStaffScopeMonth(${i},false)">Bu ayı temizle</button></div><div class="staff-scope-list">${options.filter(x=>x.period===period).map(x=>`<label class="staff-scope-item"><input type="checkbox" data-scope-key="${esc(x.key)}" ${all||selected.has(x.key)?'checked':''} onchange="updateStaffScopeSelectionCount()"><span><strong>${esc(x.paymentType)}</strong><small>${x.count} personel tahakkuku · ${money(x.total)}</small></span></label>`).join('')}</div></div>`).join('');
+  const body=`<div class="staff-scope-modal"><p>Önce ayı açın, sonra o ayın hesaba katılacak tahakkuk türlerini seçin. Aylar arasında geçiş yaptığınızda işaretler korunur.</p><div class="staff-scope-months">${monthTabs}</div><div id="staffScopeList">${panels}</div><div class="staff-scope-footer"><span id="staffScopeSelectionCount"></span><button class="btn tiny" type="button" onclick="toggleStaffScopeChecks(false)">Tüm seçimi temizle</button></div><div class="form-actions"><button class="btn ghost" value="cancel">Vazgeç</button><button class="btn primary" type="button" onclick="applyStaffScope()">Uygula</button></div></div>`;
+  showModal('Personel tahakkuk kapsamı',body);
+  updateStaffScopeSelectionCount();
+}
+function showStaffScopeMonth(index){document.querySelectorAll('.staff-scope-month').forEach((x,i)=>x.classList.toggle('active',i===index));document.querySelectorAll('.staff-scope-month-panel').forEach(x=>x.classList.toggle('hidden',Number(x.dataset.monthIndex)!==index))}
+function toggleStaffScopeChecks(checked){document.querySelectorAll('#staffScopeList input[type="checkbox"]').forEach(x=>x.checked=checked);updateStaffScopeSelectionCount()}
+function toggleStaffScopeMonth(index,checked){document.querySelectorAll(`.staff-scope-month-panel[data-month-index="${index}"] input[type="checkbox"]`).forEach(x=>x.checked=checked);updateStaffScopeSelectionCount()}
+function selectOnlyStaffScopeMonth(index){toggleStaffScopeChecks(false);toggleStaffScopeMonth(index,true)}
+function updateStaffScopeSelectionCount(){const selected=document.querySelectorAll('#staffScopeList input[type="checkbox"]:checked').length;const total=document.querySelectorAll('#staffScopeList input[type="checkbox"]').length;const el=$('#staffScopeSelectionCount');if(el)el.textContent=`${selected} / ${total} tür-dönem seçili`}
+function applyStaffScope(){
+  const inputs=[...document.querySelectorAll('#staffScopeList input[type="checkbox"]')];const selected=inputs.filter(x=>x.checked).map(x=>x.dataset.scopeKey);
+  if(!selected.length){toast('En az bir tür/dönem seçin.',true);return;}state.staffSummaryScope=selected.length===inputs.length?[]:selected;resetPage('staff-commitments');state.staffPaymentDrill={person:'',month:''};$('#modal').close();renderExpense('staff');
+}
+function clearStaffScope(){state.staffSummaryScope=[];resetPage('staff-commitments');state.staffPaymentDrill={person:'',month:''};renderExpense('staff')}
+function renderExpense(kind){
+  const d=kind==='staff'?state.data.staff:state.data.teachers;
+  const scopedCommitments=kind==='staff'?staffScopedCommitments():d.commitments;
+  const summary=kind==='staff'?staffScopeSummary(d,scopedCommitments):d.summary;
+  const label=kind==='staff'?'Personel':'Öğretmen';
+  heading(label+' ödemeleri','Tahakkuk, parçalı ödeme ve kalan bakiye takibi');
+  const tab=state.expenseTab[kind];
+  const planTab=`<button class="tab ${tab==='plans'?'active':''}" onclick="setExpenseTab('${kind}','plans')">Aylık planlar</button>`;
+  const tabs=`<div class="tabs"><button class="tab ${tab==='commitments'?'active':''}" onclick="setExpenseTab('${kind}','commitments')">Tahakkuklar</button><button class="tab ${tab==='payments'?'active':''}" onclick="setExpenseTab('${kind}','payments')">Ödeme hareketleri</button>${planTab}</div>`;
+  let body,action;
+  if(tab==='commitments'){
+    const staffQuery=kind==='staff'?normalizeSearch(state.staffAccrualSearch):'';
+    const af=state.staffAccrualFilters;
+    if(kind==='staff'){
+      const available=(key)=>[...new Set(scopedCommitments.map(x=>String(x[key]||'')).filter(Boolean))];
+      if(af.period&&!available('period').includes(af.period))af.period='';if(af.type&&!available('paymentType').includes(af.type))af.type='';if(af.status&&!available('status').includes(af.status))af.status='';
+    }
+    const accrualSorters={'total-desc':(a,b)=>b.total-a.total,'paid-desc':(a,b)=>b.paid-a.paid,'remaining-desc':(a,b)=>b.remaining-a.remaining,'name-asc':(a,b)=>a.name.localeCompare(b.name,'tr'),'name-desc':(a,b)=>b.name.localeCompare(a.name,'tr'),'period-desc':(a,b)=>staffPeriodSort(b.period)-staffPeriodSort(a.period)};
+    const commitments=[...scopedCommitments].filter(x=>(!staffQuery||normalizeSearch(x.name).includes(staffQuery))&&(kind!=='staff'||(!af.id||normalizeSearch(x.id).includes(normalizeSearch(af.id)))&&(!af.period||x.period===af.period)&&(!af.type||x.paymentType===af.type)&&(!af.status||x.status===af.status)&&(af.minTotal==null||af.minTotal===''||Number(x.total)>=Number(af.minTotal))&&(af.minPaid==null||af.minPaid===''||Number(x.paid)>=Number(af.minPaid))&&(af.minRemaining==null||af.minRemaining===''||Number(x.remaining)>=Number(af.minRemaining)))).sort(kind==='staff'?(accrualSorters[af.sort]||accrualSorters['total-desc']):(a,b)=>b.total-a.total);
+    const paged=pageData(kind+'-commitments',commitments);
+    const rows=paged.items.map(x=>`<tr><td>${esc(x.id)}</td><td>${esc(x.name)}</td><td>${esc(x.paymentType)}</td><td>${esc(x.period)}</td>${kind==='teacher'?`<td class="money">${x.lessonHours}</td><td class="money">${money(x.hourlyRate)}</td>`:''}<td class="money">${money(x.total)}</td><td class="money">${money(x.paid)}</td><td class="money">${money(x.remaining)}</td><td><span class="status ${statusClass(x.status)}">${esc(x.status)}</span></td><td><div class="row-actions">${kind==='staff'?`<button class="btn tiny" onclick="editStaffAccrualModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeStaffAccrual('${esc(x.id)}')">Sil</button>`:`<button class="btn tiny" onclick="editTeacherAccrualModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeTeacherAccrual('${esc(x.id)}')">Sil</button>`}</div></td></tr>`);
+    const headers=['Ödeme No',label,'Ders / Tür','Dönem'];
+    if(kind==='teacher')headers.push('Ders Saati','Saatlik Ücret');
+    headers.push('Toplam','Ödenen','Kalan','Durum');
+    headers.push('İşlem');
+    const staffSearch=kind==='staff'?staffAccrualFilterHtml(scopedCommitments,commitments):'';
+    body=staffSearch+table(headers,rows,(kind==='staff'&&(staffQuery||af.id||af.period||af.type||af.status||af.minTotal!==''||af.minPaid!==''||af.minRemaining!==''))?'Filtrelere uyan personel tahakkuku bulunamadı.':'Henüz tahakkuk yok.')+paged.controls;
+    action=kind==='staff'?`<div class="actions"><button class="btn secondary" onclick="bulkStaffPaymentModal()">Toplu ödeme</button><button class="btn primary" onclick="expenseCommitmentModal('${kind}')">Yeni tahakkuk</button></div>`:`<button class="btn primary" onclick="expenseCommitmentModal('${kind}')">Yeni tahakkuk</button>`;
+  }else if(tab==='plans'&&kind==='staff'){
+    const paged=pageData('staff-plans',[...(state.data.staffPlans||[])].sort((a,b)=>b.amount-a.amount));
+    const rows=paged.items.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.paymentType)}</td><td class="money">${money(x.amount)}</td><td><span class="status ${x.active?'green':'red'}">${x.active?'Aktif':'Pasif'}</span></td><td><div class="row-actions"><button class="btn tiny" onclick="editStaffPlanModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny ${x.active?'danger':'secondary'}" onclick="toggleStaffPlan('${esc(x.id)}',${!x.active})">${x.active?'Pasif':'Aktif'}</button></div></td></tr>`);
+    body=table(['Personel','Ödeme Türü','Aylık Tutar','Durum','İşlem'],rows,'Henüz aylık plan yok.')+paged.controls;
+    action=`<div class="actions"><button class="btn secondary" onclick="staffMonthModal()">Toplu tahakkuk</button><button class="btn secondary" onclick="copyStaffMonthModal()">Ayı kopyala</button><button class="btn primary" onclick="staffPlanModal()">Personel planı ekle</button></div>`;
+  }else if(tab==='plans'&&kind==='teacher'){
+    const paged=pageData('teacher-plans',[...(state.data.teacherPlans||[])].sort((a,b)=>b.amount-a.amount));
+    const rows=paged.items.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.lessonName)}</td><td class="money">${x.lessonHours}</td><td class="money">${money(x.hourlyRate)}</td><td class="money">${money(x.amount)}</td><td><span class="status ${x.active?'green':'red'}">${x.active?'Aktif':'Pasif'}</span></td><td><div class="row-actions"><button class="btn tiny" onclick="editTeacherPlanModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny ${x.active?'danger':'secondary'}" onclick="toggleTeacherPlan('${esc(x.id)}',${!x.active})">${x.active?'Pasif':'Aktif'}</button></div></td></tr>`);
+    body=table(['Öğretmen','Ders Adı','Aylık Ders Saati','Saatlik Ücret','Aylık Tahakkuk','Durum','İşlem'],rows,'Henüz öğretmen aylık planı yok.')+paged.controls;
+    action=`<div class="actions"><button class="btn secondary" onclick="teacherMonthModal()">Toplu tahakkuk</button><button class="btn secondary" onclick="copyTeacherMonthModal()">Ayı kopyala</button><button class="btn primary" onclick="teacherPlanModal()">Öğretmen planı ekle</button></div>`;
+  }else{
+    if(kind==='staff'){
+      body=renderStaffPaymentHistory(d);
+    }else{
+      const paged=pageData(kind+'-payments',[...d.payments].sort((a,b)=>b.amount-a.amount));
+      const rows=paged.items.map(x=>`<tr><td>${esc(x.id)}</td><td>${date(x.date)}</td><td>${esc(x.commitmentId)}</td><td>${esc(x.name)}</td><td class="money">${money(x.amount)}</td><td>${esc(x.method)}</td><td>${esc(x.accountName||'')}</td><td><div class="row-actions"><button class="btn tiny" onclick="editExpensePaymentModal('${kind}','${esc(x.id)}')">Düzelt</button><button class="btn tiny secondary" onclick="downloadTeacherReceipt('${esc(x.id)}')">PDF Dekont</button><button class="btn tiny danger" onclick="removeExpensePayment('${kind}','${esc(x.id)}')">Sil</button></div></td></tr>`);
+      body=table(['Hareket No','Tarih','Ödeme No',label,'Tutar','Yöntem','Kasa / Banka','İşlem'],rows)+paged.controls;
+    }
+    action=kind==='staff'?`<div class="actions"><button class="btn secondary" onclick="bulkStaffPaymentModal()">Toplu ödeme</button><button class="btn primary" onclick="expensePaymentModal('${kind}')">Ödeme ekle</button></div>`:`<button class="btn primary" onclick="expensePaymentModal('${kind}')">Ödeme ekle</button>`;
+  }
+  $('#content').innerHTML=(kind==='staff'?staffScopeToolbar(scopedCommitments):'')+cards([['Toplam tahakkuk',money(summary.total)],['Toplam ödenen',money(summary.paid)],['Kalan',money(summary.remaining),kind==='staff'?'staffRemainingModal()':''],['Dönem ödemesi',money(summary.period)]])+panel(label+' ödeme kayıtları',tabs+body,action);
+}
+function staffRemainingModal(){
+  const grouped={};staffScopedCommitments().forEach(x=>{if((Number(x.remaining)||0)<=0)return;const key=staffScopeKey(x)+'|'+normalizeSearch(x.name);const item=grouped[key]||(grouped[key]={name:x.name||'İsimsiz',paymentType:x.paymentType||'Belirtilmemiş',period:x.period||'Dönemsiz',count:0,total:0,paid:0,remaining:0});item.count++;item.total+=Number(x.total)||0;item.paid+=Number(x.paid)||0;item.remaining+=Number(x.remaining)||0});
+  const items=Object.values(grouped).sort((a,b)=>b.remaining-a.remaining);
+  const people={};items.forEach(x=>{const key=normalizeSearch(x.name)||'isimsiz';const p=people[key]||(people[key]={name:x.name||'İsimsiz',count:0,total:0,paid:0,remaining:0});p.count+=Number(x.count)||0;p.total+=Number(x.total)||0;p.paid+=Number(x.paid)||0;p.remaining+=Number(x.remaining)||0});
+  const personRows=Object.values(people).sort((a,b)=>b.remaining-a.remaining).map(x=>`<tr><td><strong>${esc(x.name)}</strong></td><td class="money">${x.count}</td><td class="money">${money(x.total)}</td><td class="money">${money(x.paid)}</td><td class="money"><strong>${money(x.remaining)}</strong></td></tr>`);
+  const detailRows=items.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.paymentType)}</td><td>${esc(x.period)}</td><td class="money">${x.count}</td><td class="money">${money(x.total)}</td><td class="money">${money(x.paid)}</td><td class="money"><strong>${money(x.remaining)}</strong></td></tr>`);
+  const summaryRemaining=staffScopeSummary(state.data.staff,staffScopedCommitments()).remaining;
+  const itemRemaining=items.reduce((sum,x)=>sum+(Number(x.remaining)||0),0);
+  const control=Math.abs(summaryRemaining-itemRemaining)<0.01?'<span class="status green">Toplam doğrulandı</span>':'<span class="status red">Toplam farkı var</span>';
+  const body=`<div class="remaining-modal-summary"><div><span>Toplam kalan</span><strong>${money(summaryRemaining)}</strong></div><div><span>Açık personel</span><strong>${Object.keys(people).length}</strong></div><div><span>Açık tahakkuk</span><strong>${items.reduce((s,x)=>s+(Number(x.count)||0),0)}</strong></div>${control}</div><div class="remaining-tables"><h4>Personel bazında kalan</h4>${table(['Personel','Açık Tahakkuk','Tahakkuk','Ödenen','Kalan'],personRows,'Kalan personel ödemesi yok.')}<h4>Ödeme türü ve tahakkuk dönemi detayı</h4>${table(['Personel','Ödeme Türü','Tahakkuk Dönemi','Adet','Tahakkuk','Ödenen','Kalan'],detailRows,'Kalan personel ödemesi yok.')}</div>`;
+  showModal('Personel kalan ödeme özeti',body);
+}
+function staffDrillArg(value){return encodeURIComponent(String(value||'')).replace(/'/g,'%27')}
+function staffMonthLabel(value){if(value==='Tarihsiz')return 'Tarihsiz';const d=new Date(value+'-01T12:00:00');return Number.isNaN(d.getTime())?value:new Intl.DateTimeFormat('tr-TR',{month:'long',year:'numeric'}).format(d)}
+function staffPeriodSort(value){const text=normalizeSearch(value);let m=text.match(/^(\d{4})-(\d{2})$/);if(m)return Number(m[1])*100+Number(m[2]);const months=['ocak','subat','mart','nisan','mayis','haziran','temmuz','agustos','eylul','ekim','kasim','aralik'];m=text.match(/(ocak|subat|mart|nisan|mayis|haziran|temmuz|agustos|eylul|ekim|kasim|aralik)\s+(\d{4})/);return m?Number(m[2])*100+months.indexOf(m[1])+1:0}
+function renderStaffPaymentHistory(d){
+  const source=[...(d.payments||[])];
+  const f=state.staffPaymentFilters;
+  const optionValues=key=>[...new Set(source.map(x=>String(x[key]||'')).filter(Boolean))].sort((a,b)=>key==='accrualPeriod'?staffPeriodSort(b)-staffPeriodSort(a):a.localeCompare(b,'tr'));
+  const filterSelect=(label,id,key,current)=>`<label>${label}<select id="${id}"><option value="">Tümü</option>${optionValues(key).map(v=>`<option value="${esc(v)}" ${v===current?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`;
+  const filterHtml=`<div class="staff-payment-filters"><label>Personel<input id="staffPaymentFilterName" type="search" value="${esc(f.name)}" placeholder="Ad soyad" onkeydown="if(event.key==='Enter'){event.preventDefault();applyStaffPaymentFilters()}"></label>${filterSelect('Tahakkuk dönemi','staffPaymentFilterPeriod','accrualPeriod',f.period)}${filterSelect('Ödeme türü','staffPaymentFilterType','paymentType',f.type)}${filterSelect('Ödeme yöntemi','staffPaymentFilterMethod','method',f.method)}${filterSelect('Kasa / Banka','staffPaymentFilterAccount','accountName',f.account)}<div class="filter-actions"><button class="btn secondary" onclick="applyStaffPaymentFilters()">Filtrele</button><button class="btn" onclick="clearStaffPaymentFilters()">Temizle</button></div></div>`;
+  const nameQuery=normalizeSearch(f.name);
+  const payments=source.filter(x=>(!nameQuery||normalizeSearch(x.name).includes(nameQuery))&&(!f.period||x.accrualPeriod===f.period)&&(!f.type||x.paymentType===f.type)&&(!f.method||x.method===f.method)&&(!f.account||x.accountName===f.account));
+  const filterSummary=`<div class="filter-result"><strong>${payments.length}</strong> / ${source.length} ödeme hareketi gösteriliyor.</div>`;
+  const finish=html=>filterHtml+filterSummary+html;
+  let person=state.staffPaymentDrill.person;
+  let month=state.staffPaymentDrill.month;
+  const personPayments=person?payments.filter(x=>normalizeSearch(x.name)===normalizeSearch(person)):[];
+  if(person&&!personPayments.length){state.staffPaymentDrill={person:'',month:''};person='';month=''}
+  if(!person){
+    const groups={};payments.forEach(x=>{const key=normalizeSearch(x.name)||'isimsiz';const g=groups[key]||(groups[key]={name:x.name||'İsimsiz',count:0,total:0,lastDate:''});g.count++;g.total+=Number(x.amount)||0;if(String(x.date||'')>g.lastDate)g.lastDate=String(x.date||'')});
+    const list=Object.values(groups).sort((a,b)=>b.total-a.total||a.name.localeCompare(b.name,'tr'));
+    const paged=pageData('staff-payment-people',list);
+    const rows=paged.items.map(x=>`<tr class="drill-row" onclick="openStaffPaymentPerson('${staffDrillArg(x.name)}')"><td><strong>${esc(x.name)}</strong></td><td class="money">${x.count}</td><td class="money">${money(x.total)}</td><td>${date(x.lastDate)}</td><td><button class="btn tiny secondary" type="button">Ayları göster</button></td></tr>`);
+    return finish(`<div class="drill-note">Her personel tek satırda gösterilir. Tahakkuk dönemlerine göre ödemeleri açmak için satıra tıklayın.</div>`+table(['Personel','Hareket Sayısı','Toplam Ödeme','Son Ödeme','Detay'],rows,source.length?'Filtrelere uyan personel ödeme hareketi bulunamadı.':'Henüz personel ödeme hareketi yok.')+paged.controls);
+  }
+  const monthGroups={};personPayments.forEach(x=>{const period=String(x.accrualPeriod||'Dönemsiz').trim()||'Dönemsiz';const key=normalizeSearch(period)||'donemsiz';const g=monthGroups[key]||(monthGroups[key]={month:period,key:key,count:0,total:0});g.count++;g.total+=Number(x.amount)||0});
+  const selectedMonthKey=normalizeSearch(month)||'donemsiz';
+  if(month&&!monthGroups[selectedMonthKey]){state.staffPaymentDrill.month='';month=''}
+  if(!month){
+    const list=Object.values(monthGroups).sort((a,b)=>staffPeriodSort(b.month)-staffPeriodSort(a.month)||b.month.localeCompare(a.month,'tr'));
+    const rows=list.map(x=>`<tr class="drill-row" onclick="openStaffPaymentMonth('${staffDrillArg(x.month)}')"><td><strong>${esc(staffMonthLabel(x.month))}</strong></td><td class="money">${x.count}</td><td class="money">${money(x.total)}</td><td><button class="btn tiny secondary" type="button">Ödemeleri göster</button></td></tr>`);
+    return finish(`<div class="drill-nav"><button class="btn" onclick="closeStaffPaymentPerson()">← Tüm personel</button><div><strong>${esc(person)}</strong><span>Tahakkuk dönemine göre ödeme özeti</span></div></div>`+table(['Tahakkuk Dönemi','Hareket Sayısı','Toplam Ödeme','Detay'],rows,'Bu personele ait ödeme yok.'));
+  }
+  const details=personPayments.filter(x=>normalizeSearch(String(x.accrualPeriod||'Dönemsiz').trim()||'Dönemsiz')===normalizeSearch(month)).sort((a,b)=>String(b.date).localeCompare(String(a.date))||b.amount-a.amount);
+  const paged=pageData('staff-payment-details',details);
+  const rows=paged.items.map(x=>`<tr><td>${esc(x.id)}</td><td>${date(x.date)}</td><td>${esc(x.commitmentId)}</td><td>${esc(x.paymentType||'')}</td><td class="money">${money(x.amount)}</td><td>${esc(x.method)}</td><td>${esc(x.accountName||'')}</td><td><div class="row-actions"><button class="btn tiny" onclick="editExpensePaymentModal('staff','${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeExpensePayment('staff','${esc(x.id)}')">Sil</button></div></td></tr>`);
+  return finish(`<div class="drill-nav"><button class="btn" onclick="closeStaffPaymentMonth()">← Dönemlere dön</button><div><strong>${esc(person)} · ${esc(staffMonthLabel(month))}</strong><span>${details.length} ödeme · ${money(details.reduce((s,x)=>s+(Number(x.amount)||0),0))}</span></div></div>`+table(['Hareket No','Ödeme Tarihi','Tahakkuk No','Ödeme Türü','Tutar','Yöntem','Kasa / Banka','İşlem'],rows)+paged.controls);
+}
+function openStaffPaymentPerson(value){state.staffPaymentDrill={person:decodeURIComponent(value),month:''};resetPage('staff-payment-details');renderExpense('staff')}
+function closeStaffPaymentPerson(){state.staffPaymentDrill={person:'',month:''};resetPage('staff-payment-people');renderExpense('staff')}
+function openStaffPaymentMonth(month){state.staffPaymentDrill.month=decodeURIComponent(month);resetPage('staff-payment-details');renderExpense('staff')}
+function closeStaffPaymentMonth(){state.staffPaymentDrill.month='';renderExpense('staff')}
+function staffAccrualFilterHtml(source,filtered){
+  const f=state.staffAccrualFilters;const values=(key)=>[...new Set(source.map(x=>String(x[key]||'')).filter(Boolean))].sort((a,b)=>key==='period'?staffPeriodSort(b)-staffPeriodSort(a):a.localeCompare(b,'tr'));
+  const select=(label,id,key,current)=>`<label>${label}<select id="${id}"><option value="">Tümü</option>${values(key).map(v=>`<option value="${esc(v)}" ${v===current?'selected':''}>${esc(v)}</option>`).join('')}</select></label>`;
+  const sortOptions=[['total-desc','Tahakkuk: büyükten küçüğe'],['paid-desc','Ödenen: büyükten küçüğe'],['remaining-desc','Kalan: büyükten küçüğe'],['period-desc','Dönem: yeniden eskiye'],['name-asc','Personel: A-Z'],['name-desc','Personel: Z-A']];
+  const filters=`<div class="staff-payment-filters staff-accrual-filters"><label>Ödeme No<input id="staffAccrualFilterId" type="search" value="${esc(f.id)}" placeholder="Kayıt numarası"></label><label>Personel<input id="staffAccrualFilterName" type="search" value="${esc(state.staffAccrualSearch)}" placeholder="Ad soyad" onkeydown="if(event.key==='Enter'){event.preventDefault();applyStaffAccrualFilters()}"></label>${select('Ders / Tür','staffAccrualFilterType','paymentType',f.type)}${select('Dönem','staffAccrualFilterPeriod','period',f.period)}<label>Toplam<input id="staffAccrualFilterMinTotal" type="number" min="0" step="0.01" value="${esc(f.minTotal)}" placeholder="En az"></label><label>Ödenen<input id="staffAccrualFilterMinPaid" type="number" min="0" step="0.01" value="${esc(f.minPaid)}" placeholder="En az"></label><label>Kalan<input id="staffAccrualFilterMinRemaining" type="number" min="0" step="0.01" value="${esc(f.minRemaining)}" placeholder="En az"></label>${select('Durum','staffAccrualFilterStatus','status',f.status)}<label>Sıralama<select id="staffAccrualFilterSort">${sortOptions.map(x=>`<option value="${x[0]}" ${f.sort===x[0]?'selected':''}>${x[1]}</option>`).join('')}</select></label><div class="filter-actions"><button class="btn secondary" onclick="applyStaffAccrualFilters()">Filtrele</button><button class="btn" onclick="clearStaffAccrualFilters()">Temizle</button></div></div>`;
+  const totals=filtered.reduce((s,x)=>{s.total+=Number(x.total)||0;s.paid+=Number(x.paid)||0;s.remaining+=Number(x.remaining)||0;return s},{total:0,paid:0,remaining:0});
+  return filters+`<div class="accrual-filter-summary"><div><span>Gösterilen kayıt</span><strong>${filtered.length} / ${source.length}</strong></div><div><span>Tahakkuk</span><strong>${money(totals.total)}</strong></div><div><span>Ödenen</span><strong>${money(totals.paid)}</strong></div><div><span>Kalan</span><strong>${money(totals.remaining)}</strong></div></div>`;
+}
+function applyStaffAccrualFilters(){state.staffAccrualSearch=$('#staffAccrualFilterName')?.value.trim()||'';state.staffAccrualFilters={id:$('#staffAccrualFilterId')?.value.trim()||'',period:$('#staffAccrualFilterPeriod')?.value||'',type:$('#staffAccrualFilterType')?.value||'',status:$('#staffAccrualFilterStatus')?.value||'',minTotal:$('#staffAccrualFilterMinTotal')?.value||'',minPaid:$('#staffAccrualFilterMinPaid')?.value||'',minRemaining:$('#staffAccrualFilterMinRemaining')?.value||'',sort:$('#staffAccrualFilterSort')?.value||'total-desc'};resetPage('staff-commitments');renderExpense('staff')}
+function clearStaffAccrualFilters(){state.staffAccrualSearch='';state.staffAccrualFilters={id:'',period:'',type:'',status:'',minTotal:'',minPaid:'',minRemaining:'',sort:'total-desc'};resetPage('staff-commitments');renderExpense('staff')}
+function applyStaffAccrualSearch(){applyStaffAccrualFilters()}
+function clearStaffAccrualSearch(){clearStaffAccrualFilters()}
+function applyStaffPaymentFilters(){state.staffPaymentFilters={name:$('#staffPaymentFilterName')?.value.trim()||'',period:$('#staffPaymentFilterPeriod')?.value||'',type:$('#staffPaymentFilterType')?.value||'',method:$('#staffPaymentFilterMethod')?.value||'',account:$('#staffPaymentFilterAccount')?.value||''};state.staffPaymentDrill={person:'',month:''};resetPage('staff-payment-people');resetPage('staff-payment-details');renderExpense('staff')}
+function clearStaffPaymentFilters(){state.staffPaymentFilters={name:'',period:'',type:'',method:'',account:''};state.staffPaymentDrill={person:'',month:''};resetPage('staff-payment-people');resetPage('staff-payment-details');renderExpense('staff')}
+function setExpenseTab(kind,tab){state.expenseTab[kind]=tab;if(kind==='staff'&&tab!=='payments')state.staffPaymentDrill={person:'',month:''};resetPage(kind+'-'+tab);renderExpense(kind)}
+function renderUsers(){heading('Kullanıcılar','Yönetici, muhasebe sorumlusu ve tahsilat kullanıcıları');const rows=[...state.data.users].sort((a,b)=>a.name.localeCompare(b.name,'tr')).map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.email)}</td><td>${esc(roleLabel(x.role))}</td><td>${esc(x.reference)}</td><td><span class="status ${x.active?'green':'red'}">${x.active?'Aktif':'Pasif'}</span></td><td><div class="row-actions"><button class="btn tiny" onclick="editUserModal('${esc(x.id)}')">Düzenle</button><button class="btn tiny ${x.active?'danger':'secondary'}" onclick="toggleUser('${esc(x.id)}',${!x.active})">${x.active?'Pasif yap':'Aktif yap'}</button></div></td></tr>`);$('#content').innerHTML=panel('Kullanıcı listesi',table(['Ad Soyad','E-posta','Kategori','Referans','Durum','İşlem'],rows),' <button class="btn primary" onclick="userModal()">Yeni kullanıcı</button>','Muhasebe sorumlusu tahsilatları onaylayabilir; kendi girişleri otomatik onaylanır.')}
+
+function showModal(title,html){$('#modalTitle').textContent=title;$('#modalBody').innerHTML=html;$('#modal').classList.toggle('wide-modal',html.includes('bulk-picker')||html.includes('remaining-tables')||html.includes('staff-scope-modal')||html.includes('bulk-target-checks')||html.includes('collection-filter-modal'));$('#modal').showModal()}
+function formHtml(fields,submit){return `<div class="form-grid">${fields}<div class="form-actions"><button class="btn ghost" value="cancel">Vazgeç</button><button class="btn primary" type="button" onclick="${submit}">Kaydet</button></div></div>`}
+function inputField(label,id,type='text',wide=false,extra=''){return `<label class="${wide?'wide':''}">${label}<input id="${id}" type="${type}" ${extra}></label>`}
+function selectField(label,id,items,wide=false){return `<label class="${wide?'wide':''}">${label}<select id="${id}">${items.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('')}</select></label>`}
+function selectValueField(label,id,items,wide=false){return `<label class="${wide?'wide':''}">${label}<select id="${id}">${items.map(x=>`<option value="${esc(x.value)}">${esc(x.label)}</option>`).join('')}</select></label>`}
+function suggestField(label,id,items,value=''){const listId=id+'Suggestions';return `<label>${label}<input id="${id}" type="text" list="${listId}" value="${esc(value)}" autocomplete="off"><datalist id="${listId}">${items.map(x=>`<option value="${esc(x)}"></option>`).join('')}</datalist></label>`}
+function normalizeSearch(value){return String(value??'').toLocaleLowerCase('tr-TR').normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/ı/g,'i').replace(/\s+/g,' ').trim()}
+function searchPickerHtml(prefix,items,labelFn){return `<div class="wide search-picker"><label>Arama<input id="${prefix}Search" type="search" placeholder="İsim, telefon, referans, tür, dönem..." oninput="filterSearchPicker('${prefix}')" autocomplete="off"></label><input id="${prefix}Selected" type="hidden"><div id="${prefix}Status" class="picker-status">Sonuçları görmek için en az 2 karakter yazın.</div><div id="${prefix}List" class="picker-list">${items.map(x=>`<button type="button" class="picker-item hidden" data-id="${esc(x.id)}" data-search="${esc(normalizeSearch(Object.values(x).join(' ')))}" onclick="selectSearchPicker('${prefix}','${esc(x.id)}',this)">${labelFn(x)}</button>`).join('')}</div></div>`}
+function filterSearchPicker(prefix){
+  const q=normalizeSearch($('#'+prefix+'Search').value);const items=[...document.querySelectorAll('#'+prefix+'List .picker-item')];let shown=0;
+  items.forEach(el=>{const match=q.length>=2&&el.dataset.search.includes(q)&&shown<100;el.classList.toggle('hidden',!match);if(match)shown++;});
+  $('#'+prefix+'Status').textContent=q.length<2?'Sonuçları görmek için en az 2 karakter yazın.':(shown?shown+' eşleşme bulundu. Seçmek için kayda tıklayın.':'Eşleşen kayıt bulunamadı.');
+}
+function selectSearchPicker(prefix,id,el){$('#'+prefix+'Selected').value=id;document.querySelectorAll('#'+prefix+'List .picker-item').forEach(x=>x.classList.remove('selected'));el.classList.add('selected');$('#'+prefix+'Status').textContent='Kayıt seçildi.'}
+function bulkPickerHtml(prefix,items,labelFn){return `<div class="wide bulk-picker"><div class="bulk-picker-tools"><label>Arama<input id="${prefix}Search" type="search" placeholder="İsim, tür, dönem, referans..." oninput="filterBulkPicker('${prefix}')" autocomplete="off"></label><div class="actions"><button class="btn tiny secondary" type="button" onclick="selectVisibleBulkItems('${prefix}',true)">Görünenleri seç</button><button class="btn tiny" type="button" onclick="selectVisibleBulkItems('${prefix}',false)">Seçimi temizle</button></div></div><div id="${prefix}Status" class="picker-status">İlk ${Math.min(100,items.length)} kayıt gösteriliyor. Arayarak farklı kayıtları seçebilirsiniz.</div><div id="${prefix}List" class="bulk-picker-list">${items.map((x,i)=>`<div class="bulk-picker-item ${i<100?'':'hidden'}" data-id="${esc(x.id)}" data-search="${esc(normalizeSearch(Object.values(x).join(' ')))}"><input class="bulk-check" type="checkbox" aria-label="Kaydı seç" onchange="toggleBulkItem('${prefix}',this)"><button type="button" class="bulk-picker-copy" onclick="toggleBulkItemFromLabel('${prefix}',this)">${labelFn(x)}</button><label>Tutar<input class="bulk-amount" type="number" min="0.01" max="${Number(x.remaining)||0}" step="0.01" value="${Number(x.remaining)||0}" disabled oninput="updateBulkPickerTotal('${prefix}')"></label></div>`).join('')}</div><div class="bulk-picker-summary"><strong id="${prefix}Count">0 kayıt seçildi</strong><span id="${prefix}Total">${money(0)}</span></div></div>`}
+function filterBulkPicker(prefix){const q=normalizeSearch($('#'+prefix+'Search').value);const rows=[...document.querySelectorAll('#'+prefix+'List .bulk-picker-item')];let shown=0;rows.forEach(row=>{const checked=row.querySelector('.bulk-check').checked;const match=(q.length<2?shown<100:row.dataset.search.includes(q)&&shown<200)||checked;row.classList.toggle('hidden',!match);if(match&&!checked)shown++});$('#'+prefix+'Status').textContent=q.length<2?`İlk ${Math.min(100,shown)} kayıt gösteriliyor.`:(shown?shown+' eşleşme gösteriliyor.':'Eşleşen yeni kayıt yok; seçilmiş kayıtlar görünmeye devam eder.')}
+function toggleBulkItem(prefix,checkbox){const row=checkbox.closest('.bulk-picker-item');row.classList.toggle('selected',checkbox.checked);row.querySelector('.bulk-amount').disabled=!checkbox.checked;updateBulkPickerTotal(prefix)}
+function toggleBulkItemFromLabel(prefix,button){const checkbox=button.closest('.bulk-picker-item').querySelector('.bulk-check');checkbox.checked=!checkbox.checked;toggleBulkItem(prefix,checkbox)}
+function selectVisibleBulkItems(prefix,selected){document.querySelectorAll('#'+prefix+'List .bulk-picker-item:not(.hidden)').forEach(row=>{const checkbox=row.querySelector('.bulk-check');checkbox.checked=selected;row.classList.toggle('selected',selected);row.querySelector('.bulk-amount').disabled=!selected});updateBulkPickerTotal(prefix)}
+function updateBulkPickerTotal(prefix){const selected=[...document.querySelectorAll('#'+prefix+'List .bulk-picker-item .bulk-check:checked')];const total=selected.reduce((sum,checkbox)=>sum+(Number(checkbox.closest('.bulk-picker-item').querySelector('.bulk-amount').value)||0),0);$('#'+prefix+'Count').textContent=selected.length+' kayıt seçildi';$('#'+prefix+'Total').textContent=money(total)}
+function collectBulkPickerItems(prefix,idField){const rows=[...document.querySelectorAll('#'+prefix+'List .bulk-picker-item')].filter(row=>row.querySelector('.bulk-check').checked);if(!rows.length)throw new Error('En az bir kayıt seçin.');if(rows.length>200)throw new Error('Tek işlemde en fazla 200 kayıt seçebilirsiniz.');return rows.map(row=>({[idField]:row.dataset.id,amount:row.querySelector('.bulk-amount').value}))}
+function pledgeAccountingFields(x={}){const approver=isApprover();const types=x.donationType&&!state.data.donationTypes.includes(x.donationType)?[x.donationType,...state.data.donationTypes]:state.data.donationTypes;return inputField('Yıl','fYear','number',false,`min="1900" max="2100" value="${esc(x.year||new Date().getFullYear())}"`)+inputField('Faaliyet','fActivity','text',false,`value="${esc(x.activity||'')}"`)+inputField('Alt Faaliyet','fSubActivity','text',false,`value="${esc(x.subActivity||'')}"`)+inputField('Hesap Adı','fName','text',false,`value="${esc(x.fullName||'')}"`)+inputField('Kimin Adına','fPayer','text',false,`value="${esc(x.payer||'')}"`)+inputField('İletişim Tel','fPhone','tel',false,`value="${esc(x.phone||'')}"`)+(approver?inputField('Referans','fReference','text',false,`value="${esc(x.reference||'')}"`):'')+selectField('Referans Nevi','fType',types)+inputField('Takip Eden','fGroup','text',false,`value="${esc(x.group||'')}"`)+inputField('Tahakkuk (TL)','fAmount','number',false,`min="${x.paid||0.01}" step="0.01" value="${esc(x.amount||'')}"`)+inputField('Notlar','fNotes','text',true,`value="${esc(x.notes||'')}"`)+(x.id?`<div class="wide selected-pledge-summary"><strong>Ödenen: ${money(x.paid)}</strong><span>Kalan: ${money(x.remaining)} · Bu iki alan tahsilatlardan otomatik hesaplanır.</span></div>`:'')}
+function pledgeFormPayload(){return {year:$('#fYear').value,activity:$('#fActivity').value,subActivity:$('#fSubActivity').value,accountCode:'',fullName:$('#fName').value,payer:$('#fPayer').value,phone:$('#fPhone').value,reference:$('#fReference')?.value||'',donationType:$('#fType').value,group:$('#fGroup').value,amount:$('#fAmount').value,notes:$('#fNotes').value}}
+function pledgeModal(){showModal('Yeni taahhüt',formHtml(pledgeAccountingFields(),'submitPledge()'));$('#fType').value=state.data.donationTypes[0]||''}
+async function submitPledge(){await submit('savePledge',pledgeFormPayload())}
+function editPledgeModal(id){
+  const x=state.data.pledges.find(r=>r.id===id);if(!x)return;
+  showModal('Taahhüdü düzenle',formHtml(pledgeAccountingFields(x),`submitPledgeEdit('${esc(id)}')`));$('#fType').value=x.donationType;
+}
+async function submitPledgeEdit(id){await submit('updatePledge',Object.assign({id:id},pledgeFormPayload()))}
+function studentAccrualModal(){
+  const types=['Aylık Ücret','Eğitim Ücreti','Yemek','Servis','Kitap / Materyal','Etüt','Diğer'];
+  const today=new Date().toISOString().slice(0,10);const first=studentNextMonthValue(today);
+  const fields=inputField('Öğrenci adı soyadı','fStudentName')+inputField('Veli / Ödeyen','fPayer')+inputField('Telefon','fPhone','tel')+selectField('Ödeme türü','fStudentType',types)+inputField('Toplam bedel','fAmount','number',false,'min="0.01" step="0.01" oninput="updateStudentPlanPreview()"')+inputField('Peşinat','fDownPayment','number',false,'min="0" step="0.01" value="0" oninput="updateStudentPlanPreview()"')+inputField('Tahakkuk / peşinat vadesi','fDate','date',false,`value="${today}"`)+inputField('İlk taksit tarihi','fFirstInstallmentDate','date',false,`value="${first}"`)+inputField('8 taksit aylık tutarı','fInstallmentPreview','text',false,'readonly value="0,00 TL"')+`<div class="wide upload-note"><strong>Ödeme planı</strong><span>Peşinat tahakkuk tarihinde, kalan bedel ise ilk taksit tarihinden başlayarak 8 eşit aylık taksitte takip edilir.</span></div>`;
+  showModal('Yeni öğrenci tahakkuku',formHtml(fields,'submitStudentAccrual()'));
+}
+function studentNextMonthValue(value){const d=new Date((value||new Date().toISOString().slice(0,10))+'T12:00:00');const day=d.getDate();d.setDate(1);d.setMonth(d.getMonth()+1);const last=new Date(d.getFullYear(),d.getMonth()+1,0).getDate();d.setDate(Math.min(day,last));return d.toISOString().slice(0,10)}
+function updateStudentPlanPreview(){const total=Number($('#fAmount')?.value)||0;const down=Number($('#fDownPayment')?.value)||0;const monthly=Math.max(0,total-down)/8;if($('#fInstallmentPreview'))$('#fInstallmentPreview').value=money(monthly)}
+async function submitStudentAccrual(){await submit('saveStudentAccrual',{studentName:$('#fStudentName').value,payer:$('#fPayer').value,phone:$('#fPhone').value,feeType:$('#fStudentType').value,amount:$('#fAmount').value,downPayment:$('#fDownPayment').value,firstInstallmentDate:$('#fFirstInstallmentDate').value,accrualDate:$('#fDate').value})}
+function editStudentAccrualModal(id){
+  const x=(state.data.students?.accruals||state.data.pledges||[]).find(r=>r.id===id);if(!x)return;
+  const defaults=['Aylık Ücret','Eğitim Ücreti','Yemek','Servis','Kitap / Materyal','Etüt','Diğer'];
+  const types=defaults.includes(x.donationType)?defaults:[x.donationType,...defaults];
+  const p=x.paymentPlan||{};const down=p.configured?p.downPayment:0;const first=p.firstInstallmentDate||studentNextMonthValue(x.pledgeDate);
+  const fields=inputField('Öğrenci adı soyadı','fStudentName','text',false,`value="${esc(x.fullName)}"`)+inputField('Veli / Ödeyen','fPayer','text',false,`value="${esc(x.payer||'')}"`)+inputField('Telefon','fPhone','tel',false,`value="${esc(x.phone||'')}"`)+selectField('Ödeme türü','fStudentType',types)+inputField('Toplam bedel','fAmount','number',false,`min="${x.paid||0}" step="0.01" value="${x.amount}" oninput="updateStudentPlanPreview()"`)+inputField('Peşinat','fDownPayment','number',false,`min="0" step="0.01" value="${down}" oninput="updateStudentPlanPreview()"`)+inputField('Tahakkuk / peşinat vadesi','fDate','date',false,`value="${x.pledgeDate}"`)+inputField('İlk taksit tarihi','fFirstInstallmentDate','date',false,`value="${first}"`)+inputField('8 taksit aylık tutarı','fInstallmentPreview','text',false,`readonly value="${esc(money((x.amount-down)/8))}"`)+`<div class="wide upload-note"><strong>Mevcut tahsilatlar korunur.</strong><span>Ödemeler peşinattan başlayarak vadesi en eski taksite otomatik dağıtılır; geciken tutar yeniden hesaplanır.</span></div>`;
+  showModal('Öğrenci tahakkukunu düzenle',formHtml(fields,`submitStudentAccrualEdit('${esc(id)}')`));$('#fStudentType').value=x.donationType;
+}
+async function submitStudentAccrualEdit(id){await submit('updateStudentAccrual',{id:id,studentName:$('#fStudentName').value,payer:$('#fPayer').value,phone:$('#fPhone').value,feeType:$('#fStudentType').value,amount:$('#fAmount').value,downPayment:$('#fDownPayment').value,firstInstallmentDate:$('#fFirstInstallmentDate').value,accrualDate:$('#fDate').value})}
+function studentPledgeImportModal(){
+  const items=(state.data.pledges||[]).filter(x=>x.source!=='ÖĞRENCİ'&&String(x.receivableStatus||'AKTİF').toUpperCase()!=='ŞÜPHELİ');
+  if(!items.length){toast('Aktarılabilecek aktif taahhüt bulunamadı.',true);return}
+  const list=items.map((x,i)=>`<div class="bulk-picker-item student-import-item ${i<100?'':'hidden'}" data-id="${esc(x.id)}" data-search="${esc(normalizeSearch([x.id,x.fullName,x.payer,x.phone,x.activity,x.subActivity,x.donationType,x.group].join(' ')))}"><input class="bulk-check" type="checkbox" aria-label="Taahhüdü seç" onchange="toggleStudentImportItem(this)"><button type="button" class="bulk-picker-copy" onclick="toggleStudentImportFromLabel(this)"><strong>${esc(x.fullName)} · ${money(x.amount)}</strong><span>${esc(x.payer||'Ödeyen belirtilmemiş')} · ${esc(x.donationType)} · Ödenen ${money(x.paid)} · Kalan ${money(x.remaining)}</span></button></div>`).join('');
+  const fields=`<div class="wide bulk-picker"><div class="upload-note"><strong>Mevcut kayıtlar taşınır, kopyalanmaz.</strong><span>Bağlı tahsilatlar Öğrenci Ödemeleri'nde görünür; genel Tahsilatlar ile Kasa/Banka kayıtlarında kalmaya devam eder.</span></div><div class="bulk-picker-tools"><label>Taahhüt ara<input id="studentImportSearch" type="search" placeholder="Öğrenci, veli, telefon, faaliyet veya nevi" oninput="filterStudentImport()" autocomplete="off"></label><div class="actions"><button class="btn tiny secondary" type="button" onclick="selectVisibleStudentImports(true)">Görünenleri seç</button><button class="btn tiny" type="button" onclick="selectVisibleStudentImports(false)">Seçimi temizle</button></div></div><div id="studentImportStatus" class="picker-status">İlk ${Math.min(100,items.length)} kayıt gösteriliyor.</div><div id="studentImportList" class="bulk-picker-list">${list}</div><div class="bulk-picker-summary"><strong id="studentImportCount">0 kayıt seçildi</strong><span>En fazla 500 kayıt</span></div></div>`;
+  showModal('Taahhütlerden öğrenci tahakkuku aktar',formHtml(fields,'submitStudentPledgeImport()'));
+}
+function filterStudentImport(){const q=normalizeSearch($('#studentImportSearch').value);const rows=[...document.querySelectorAll('#studentImportList .student-import-item')];let shown=0;rows.forEach(row=>{const checked=row.querySelector('.bulk-check').checked;const match=(q.length<2?shown<100:row.dataset.search.includes(q)&&shown<200)||checked;row.classList.toggle('hidden',!match);if(match&&!checked)shown++});$('#studentImportStatus').textContent=q.length<2?`İlk ${Math.min(100,shown)} kayıt gösteriliyor.`:(shown?shown+' eşleşme gösteriliyor.':'Eşleşen kayıt bulunamadı.');}
+function updateStudentImportCount(){const count=document.querySelectorAll('#studentImportList .bulk-check:checked').length;$('#studentImportCount').textContent=count+' kayıt seçildi'}
+function toggleStudentImportItem(checkbox){checkbox.closest('.student-import-item').classList.toggle('selected',checkbox.checked);updateStudentImportCount()}
+function toggleStudentImportFromLabel(button){const checkbox=button.closest('.student-import-item').querySelector('.bulk-check');checkbox.checked=!checkbox.checked;toggleStudentImportItem(checkbox)}
+function selectVisibleStudentImports(selected){document.querySelectorAll('#studentImportList .student-import-item:not(.hidden)').forEach(row=>{const checkbox=row.querySelector('.bulk-check');checkbox.checked=selected;row.classList.toggle('selected',selected)});updateStudentImportCount()}
+async function submitStudentPledgeImport(){const ids=[...document.querySelectorAll('#studentImportList .bulk-check:checked')].map(x=>x.closest('.student-import-item').dataset.id);if(!ids.length){toast('En az bir taahhüt seçin.',true);return}if(ids.length>500){toast('Tek işlemde en fazla 500 taahhüt seçebilirsiniz.',true);return}if(!confirm(`${ids.length} taahhüt öğrenci tahakkuklarına aktarılsın mı?`))return;await convertPledgesToStudent(ids)}
+async function convertSinglePledgeToStudent(id){if(!confirm('Seçilen taahhüt Öğrenci Ödemeleri tahakkuklarına aktarılsın mı? Bağlı tahsilatlar korunacaktır.'))return;await convertPledgesToStudent([id])}
+async function convertPledgesToStudent(ids){if($('#modal').open)$('#modal').close();setBusy(true);try{const r=await server('convertPledgesToStudentAccruals',state.token,ids);state.studentTab='accruals';toast(`${r.converted} taahhüt aktarıldı; ${r.linkedPayments} bağlı tahsilat korundu.${r.skipped?' '+r.skipped+' kayıt atlandı.':''}`);scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}}
+async function removeStudentAccrual(id){if(!confirm('Bu öğrenci tahakkuku ve bağlı tüm tahsilatlar kalıcı olarak silinsin mi?'))return;setBusy(true);try{const r=await server('deletePledge',state.token,id);toast(`Öğrenci tahakkuku silindi. ${r.deletedCollections} bağlı tahsilat kaldırıldı.`);scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}}
+function excelXmlEscape(value){return String(value??'').replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g,'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]))}
+function excelColumnName(index){let name='';for(let n=index+1;n>0;n=Math.floor((n-1)/26))name=String.fromCharCode(65+(n-1)%26)+name;return name}
+function excelCellValue(raw){if(raw&&typeof raw==='object'&&typeof raw.type==='string'){if(raw.type==='number')return {type:'number',value:Number(raw.value)||0};if(raw.type==='boolean')return {type:'boolean',value:Boolean(raw.value)};if(raw.type==='date')return {type:'date',value:String(raw.value||'')};return {type:'text',value:String(raw.value??'')}}if(typeof raw==='number')return {type:'number',value:Number(raw)||0};if(typeof raw==='boolean')return {type:'boolean',value:raw};return {type:'text',value:String(raw??'')}}
+function excelIsMoneyHeader(value){return /TUTAR|TAHAKKUK|ÖDENEN|ODENEN|KALAN|BAKİYE|BAKIYE|HEDEF|ÜCRET|UCRET|TOPLAM|GELİR|GELIR|GİDER|GIDER|BORÇ|BORC|TAHSİLAT/i.test(String(value||''))}
+function excelBytesConcat(parts){const size=parts.reduce((s,p)=>s+p.length,0);const out=new Uint8Array(size);let offset=0;parts.forEach(p=>{out.set(p,offset);offset+=p.length});return out}
+function excelU16(value){return new Uint8Array([value&255,(value>>>8)&255])}
+function excelU32(value){return new Uint8Array([value&255,(value>>>8)&255,(value>>>16)&255,(value>>>24)&255])}
+function excelCrc32(bytes){if(!excelCrc32.table){excelCrc32.table=Array.from({length:256},(_,n)=>{let c=n;for(let k=0;k<8;k++)c=(c&1)?0xEDB88320^(c>>>1):c>>>1;return c>>>0})}let crc=0xFFFFFFFF;for(const byte of bytes)crc=excelCrc32.table[(crc^byte)&255]^(crc>>>8);return (crc^0xFFFFFFFF)>>>0}
+function excelDosDateTime(value){const d=value||new Date();return {time:((d.getHours()&31)<<11)|((d.getMinutes()&63)<<5)|Math.floor(d.getSeconds()/2),date:(((Math.max(1980,d.getFullYear())-1980)&127)<<9)|(((d.getMonth()+1)&15)<<5)|(d.getDate()&31)}}
+function excelZip(entries){const encoder=new TextEncoder();const local=[];const central=[];let offset=0;const stamp=excelDosDateTime(new Date());entries.forEach(entry=>{const name=encoder.encode(entry.name);const data=typeof entry.data==='string'?encoder.encode(entry.data):entry.data;const crc=excelCrc32(data);const localHeader=excelBytesConcat([excelU32(0x04034b50),excelU16(20),excelU16(0x0800),excelU16(0),excelU16(stamp.time),excelU16(stamp.date),excelU32(crc),excelU32(data.length),excelU32(data.length),excelU16(name.length),excelU16(0),name]);local.push(localHeader,data);const centralHeader=excelBytesConcat([excelU32(0x02014b50),excelU16(20),excelU16(20),excelU16(0x0800),excelU16(0),excelU16(stamp.time),excelU16(stamp.date),excelU32(crc),excelU32(data.length),excelU32(data.length),excelU16(name.length),excelU16(0),excelU16(0),excelU16(0),excelU16(0),excelU32(0),excelU32(offset),name]);central.push(centralHeader);offset+=localHeader.length+data.length});const centralBytes=excelBytesConcat(central);const end=excelBytesConcat([excelU32(0x06054b50),excelU16(0),excelU16(0),excelU16(entries.length),excelU16(entries.length),excelU32(centralBytes.length),excelU32(offset),excelU16(0)]);return excelBytesConcat([...local,centralBytes,end])}
+function excelUniqueSheetNames(sheets){const used=new Set();return sheets.map((sheet,index)=>{let base=String(sheet.name||('Sayfa '+(index+1))).replace(/[\\\/?*\[\]:]/g,' ').trim().slice(0,31)||('Sayfa '+(index+1));let name=base;let n=2;while(used.has(name.toLocaleLowerCase('tr-TR'))){const suffix=' '+n++;name=base.slice(0,31-suffix.length)+suffix}used.add(name.toLocaleLowerCase('tr-TR'));return Object.assign({},sheet,{excelName:name})})}
+function excelWorksheetXml(sheet){const rows=Array.isArray(sheet.values)?sheet.values:[];const rowCount=Math.max(1,rows.length);const colCount=Math.max(1,...rows.map(r=>Array.isArray(r)?r.length:0));const headers=(rows[0]||[]).map(x=>excelCellValue(x).value);const widths=Array.from({length:colCount},(_,c)=>{let max=String(headers[c]||'').length;for(let r=1;r<Math.min(rows.length,250);r++)max=Math.max(max,String(excelCellValue((rows[r]||[])[c]).value||'').length);return Math.min(45,Math.max(10,max+2))});const cols=widths.map((width,i)=>`<col min="${i+1}" max="${i+1}" width="${width}" customWidth="1"/>`).join('');const body=rows.map((row,r)=>{const cells=(row||[]).map((raw,c)=>{const value=excelCellValue(raw);const ref=excelColumnName(c)+(r+1);const moneyStyle=r>0&&value.type==='number'&&excelIsMoneyHeader(headers[c]);const style=r===0?1:(value.type==='date'?2:(moneyStyle?3:0));if(value.type==='number')return `<c r="${ref}" s="${style}"><v>${Number.isFinite(value.value)?value.value:0}</v></c>`;if(value.type==='boolean')return `<c r="${ref}" s="${style}" t="b"><v>${value.value?1:0}</v></c>`;if(value.type==='date'){const ms=Date.parse(value.value);const serial=Number.isFinite(ms)?ms/86400000+25569:0;return `<c r="${ref}" s="2"><v>${serial}</v></c>`}const text=String(value.value||'').slice(0,32767);return `<c r="${ref}" s="${style}" t="inlineStr"><is><t xml:space="preserve">${excelXmlEscape(text)}</t></is></c>`}).join('');return `<row r="${r+1}">${cells}</row>`}).join('');const last=excelColumnName(colCount-1)+rowCount;const filter=rows.length>1?`<autoFilter ref="A1:${last}"/>`:'';return `<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><dimension ref="A1:${last}"/><sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetFormatPr defaultRowHeight="15"/><cols>${cols}</cols><sheetData>${body}</sheetData>${filter}</worksheet>`}
+function excelSchemaUrl(path){return 'http:'+String.fromCharCode(47,47)+'schemas.openxmlformats.org/'+path}
+function buildAllDataWorkbookXlsx(backup){
+  const source=Array.isArray(backup?.sheets)?backup.sheets:[];
+  if(!source.length)throw new Error('Excel dosyasına aktarılacak veri bulunamadı.');
+  const sheets=excelUniqueSheetNames(source);
+  const contentNs=excelSchemaUrl('package/2006/content-types');
+  const packageRelsNs=excelSchemaUrl('package/2006/relationships');
+  const sheetNs=excelSchemaUrl('spreadsheetml/2006/main');
+  const officeRelsNs=excelSchemaUrl('officeDocument/2006/relationships');
+  const types=`<Types xmlns="${contentNs}"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>${sheets.map((_,i)=>`<Override PartName="/xl/worksheets/sheet${i+1}.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>`).join('')}</Types>`;
+  const rootRels=`<Relationships xmlns="${packageRelsNs}"><Relationship Id="rId1" Type="${officeRelsNs}/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
+  const workbook=`<workbook xmlns="${sheetNs}" xmlns:r="${officeRelsNs}"><bookViews><workbookView/></bookViews><sheets>${sheets.map((s,i)=>`<sheet name="${excelXmlEscape(s.excelName)}" sheetId="${i+1}" r:id="rId${i+1}"/>`).join('')}</sheets></workbook>`;
+  const workbookRels=`<Relationships xmlns="${packageRelsNs}">${sheets.map((_,i)=>`<Relationship Id="rId${i+1}" Type="${officeRelsNs}/worksheet" Target="worksheets/sheet${i+1}.xml"/>`).join('')}<Relationship Id="rId${sheets.length+1}" Type="${officeRelsNs}/styles" Target="styles.xml"/></Relationships>`;
+  const styles=`<styleSheet xmlns="${sheetNs}"><numFmts count="2"><numFmt numFmtId="164" formatCode="yyyy-mm-dd"/><numFmt numFmtId="165" formatCode="#,##0.00"/></numFmts><fonts count="2"><font><sz val="10"/><name val="Arial"/></font><font><b/><color rgb="FFFFFFFF"/><sz val="10"/><name val="Arial"/></font></fonts><fills count="3"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill><fill><patternFill patternType="solid"><fgColor rgb="FF163A5F"/><bgColor indexed="64"/></patternFill></fill></fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="4"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="0" fontId="1" fillId="2" borderId="0" xfId="0" applyFont="1" applyFill="1" applyAlignment="1"><alignment horizontal="center" vertical="center"/></xf><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/><xf numFmtId="165" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+  const entries=[{name:'[Content_Types].xml',data:types},{name:'_rels/.rels',data:rootRels},{name:'xl/workbook.xml',data:workbook},{name:'xl/_rels/workbook.xml.rels',data:workbookRels},{name:'xl/styles.xml',data:styles}];
+  sheets.forEach((sheet,i)=>entries.push({name:`xl/worksheets/sheet${i+1}.xml`,data:excelWorksheetXml(sheet)}));
+  return excelZip(entries);
+}
+async function downloadAllDataExcel(){if(state.data?.user?.role!=='YÖNETİCİ'){toast('Tüm veri aktarımı yalnızca yöneticiye açıktır.',true);return}setBusy(true);toast('Tüm veriler Excel için hazırlanıyor.');try{const file=await server('generateFullDataBackup',state.token);if(!file?.base64)throw new Error('Veri yedeği hazırlanamadı.');const bytes=Uint8Array.from(atob(file.base64),c=>c.charCodeAt(0));const backup=JSON.parse(new TextDecoder('utf-8').decode(bytes));const xlsx=buildAllDataWorkbookXlsx(backup);const blob=new Blob([xlsx],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='tahsilat-tum-veriler-'+new Date().toISOString().slice(0,10)+'.xlsx';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),3000);toast(`${backup.sheets.length} veri sayfası Excel dosyasına aktarıldı.`)}catch(e){toast(e.message||'Excel aktarımı tamamlanamadı.',true)}finally{setBusy(false)}}
+function downloadPledgeTemplate(){
+  const headers=['Yıl','Faaliyet','Alt Faaliyet','Hesap Adı','Kimin Adına','İletişim Tel','Referans','Referans Nevi','Takip Eden','Tahakkuk (TL)','Ödenen (TL)','Kalan (TL)','Notlar'];
+  const csv='\uFEFF'+headers.join(';')+'\r\n';
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement('a');
+  a.href=url;a.download='toplu-taahhut-sablonu.csv';document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(url),1000);
+  toast('Taahhüt şablonu indirildi.');
+}
+function bulkPledgeModal(){
+  const fields=`<label class="wide">Muhasebe sisteminden alınan CSV dosyası<input id="fBulkFile" type="file" accept=".csv,.txt,text/csv,text/plain" required></label><div class="wide upload-note"><strong>13 sütun başlığını değiştirmeyin.</strong><span>TAHAKKUK (TL) toplam taahhüttür. ÖDENEN (TL) boşsa 0 kabul edilir. KALAN (TL), TAHAKKUK (TL) − ÖDENEN (TL) olmalıdır.</span><span>Dosyayı Excel'de CSV UTF-8 biçiminde kaydedin. Faaliyet, Alt Faaliyet, Referans Nevi, Takip Eden ve Notlar bilgileri ayrıca saklanır.</span></div>`;
+  showModal('Toplu taahhüt ekle',formHtml(fields,'submitBulkPledges()'));
+}
+function personnelPdfModal(){
+  const names=state.data.pledgePersonnelNames||[];
+  if(!names.length){toast('PERSONEL alanı dolu taahhüt bulunamadı.',true);return;}
+  showModal('Personel bazlı PDF raporu',formHtml(selectField('Personel','fPdfPersonnel',names,true),'downloadPersonnelPdf()'));
+}
+async function downloadPersonnelPdf(){
+  setBusy(true);
+  try{const r=await server('generatePersonnelPledgePdf',state.token,$('#fPdfPersonnel').value);const bytes=Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0));const blob=new Blob([bytes],{type:r.mimeType});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=r.fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500);$('#modal').close();toast('PDF raporu indirildi.')}catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
+function normalizeUploadHeader(value){return String(value||'').trim().toUpperCase().replace(/İ/g,'I').replace(/Ş/g,'S').replace(/Ğ/g,'G').replace(/Ü/g,'U').replace(/Ö/g,'O').replace(/Ç/g,'C').replace(/\s+/g,' ')}
+function detectDelimiter(text){
+  const first=(text.replace(/^\uFEFF/,'').split(/\r?\n/,1)[0]||'');
+  const options=[';','\t',','];
+  return options.sort((a,b)=>first.split(b).length-first.split(a).length)[0];
+}
+function parseDelimited(text){
+  text=String(text||'').replace(/^\uFEFF/,'').replace(/\r\n/g,'\n').replace(/\r/g,'\n');
+  const delimiter=detectDelimiter(text);
+  const rows=[];let row=[],cell='',quoted=false;
+  for(let i=0;i<text.length;i++){
+    const ch=text[i];
+    if(ch==='"'){
+      if(quoted&&text[i+1]==='"'){cell+='"';i++;}else quoted=!quoted;
+    }else if(ch===delimiter&&!quoted){row.push(cell);cell='';}
+    else if(ch==='\n'&&!quoted){row.push(cell);rows.push(row);row=[];cell='';}
+    else cell+=ch;
+  }
+  if(cell!==''||row.length){row.push(cell);rows.push(row);}
+  return rows;
+}
+function downloadAccountingTemplate(){
+  const headers=['MUHASEBE KAYIT NO','İŞLEM TÜRÜ','TARİH','BAĞLI KAYIT NO','ADI SOYADI / HESAP','BAĞIŞ / ÖDEME TÜRÜ','ÖDEYEN','REFERANS','DÖNEM','TUTAR','ÖDEME YÖNTEMİ','KASA / BANKA','AÇIKLAMA'];
+  const csv='\uFEFF'+headers.join(';')+'\r\n';
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='muhasebe-hareket-aktarim-sablonu.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Excel uyumlu muhasebe şablonu indirildi.');
+}
+function downloadBulkDonationTemplate(){
+  const headers=['Tarih','Makbuz No','Kimin Adına','Referans','Grubu','Faaliyet','Telefon','Ödeme Tipi','Giriş Hesabı','Tahsilat (TL)'];
+  const csv='\uFEFF'+headers.join(';')+'\r\n';
+  const blob=new Blob([csv],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download='toplu-bagis-aktarim-sablonu.csv';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);toast('Toplu bağış şablonu indirildi.');
+}
+function bulkDonationImportModal(){
+  const accounts=((state.data.cash&&state.data.cash.accounts)||[]).filter(x=>x.active).map(x=>x.name).join(', ');
+  const fields=`<label class="wide">Muhasebeden alınan CSV dosyası<input id="fBulkDonationFile" type="file" accept=".csv,.txt,text/csv,text/plain" required></label><div class="wide upload-note"><strong>Makbuz No dışındaki 9 sütun başlığını değiştirmeyin.</strong><span>Makbuz No sütunu isteğe bağlıdır; dosyada bulunmayabilir, boş olabilir ve teberru aktarımında tekrar kontrolü için kullanılmaz. Referans alanı boş olan kayıtlar otomatik olarak YURT referansına aktarılır.</span><span>Ödeme Tipi bağış/gelir türü olarak kaydedilir. Giriş Hesabı sistemdeki aktif hesap adıyla aynı olmalıdır: ${esc(accounts||'Aktif hesap bulunamadı')}</span><span>Dosyayı Excel'de “CSV UTF-8” biçiminde kaydedin.</span></div>`;
+  showModal('Toplu teberru aktar',formHtml(fields,'submitBulkDonationImport()'));
+}
+async function submitBulkDonationImport(){
+  const file=$('#fBulkDonationFile').files[0];if(!file){toast('Doldurulmuş dosyayı seçin.',true);return}if(file.size>4*1024*1024){toast('Dosya 4 MB boyutundan büyük olamaz.',true);return}
+  setBusy(true);
+  try{
+    const matrix=parseDelimited(await file.text());if(matrix.length<2)throw new Error('Dosyada başlık dışında bağış bulunamadı.');
+    const headers=matrix[0].map(normalizeUploadHeader);const required=['TARIH','KIMIN ADINA','REFERANS','GRUBU','FAALIYET','TELEFON','ODEME TIPI','GIRIS HESABI','TAHSILAT (TL)'];const missing=required.filter(h=>!headers.includes(h));if(missing.length)throw new Error('Eksik veya değiştirilmiş başlıklar: '+missing.join(', '));
+    const col={};headers.forEach((h,i)=>col[h]=i);
+    const rows=matrix.slice(1).filter(r=>r.some(v=>String(v||'').trim()!=='')).map(r=>({date:r[col.TARIH]||'',receiptNo:r[col['MAKBUZ NO']]||'',name:r[col['KIMIN ADINA']]||'',reference:r[col.REFERANS]||'',group:r[col.GRUBU]||'',activity:r[col.FAALIYET]||'',phone:r[col.TELEFON]||'',paymentType:r[col['ODEME TIPI']]||'',account:r[col['GIRIS HESABI']]||'',amount:r[col['TAHSILAT (TL)']]||''}));
+    if(!rows.length)throw new Error('Dosyada aktarılacak bağış bulunamadı.');
+    const result=await server('bulkImportDonations',state.token,{rows:rows});scheduleDataSync();
+    const summary=`${result.imported} teberru aktarıldı · ${money(result.total)} · ${result.errors.length} hatalı satır.`;if(result.errors.length)alert(summary+'\n\n'+result.errors.slice(0,20).join('\n'));else toast(summary);
+  }catch(e){alert(e.message);toast(e.message,true)}finally{setBusy(false)}
+}
+function accountingImportModal(){
+  const fields=`<label class="wide">Doldurulmuş Excel CSV dosyası<input id="fAccountingFile" type="file" accept=".csv,.txt,text/csv,text/plain" required></label><div class="wide upload-note"><strong>Dosyayı Excel'de “CSV UTF-8” olarak kaydedin.</strong><span>TAHSİLAT için BAĞLI KAYIT NO alanına taahhüt numarası; personel/öğretmen ödemesi için tahakkuk numarası yazılması en güvenli eşleştirmedir.</span><span>Numara yoksa sistem ad, tür, referans veya dönemden tek bir açık kayıt bulmaya çalışır. KASA / BANKA değeri sistemdeki hesap adıyla aynı olmalıdır.</span></div>`;
+  showModal('Muhasebe hareketlerini toplu aktar',formHtml(fields,'submitAccountingImport()'));
+}
+async function submitAccountingImport(){
+  const file=$('#fAccountingFile').files[0];if(!file){toast('Doldurulmuş dosyayı seçin.',true);return;}if(file.size>4*1024*1024){toast('Dosya 4 MB boyutundan büyük olamaz.',true);return;}
+  setBusy(true);
+  try{
+    const matrix=parseDelimited(await file.text());if(matrix.length<2)throw new Error('Dosyada başlık dışında hareket bulunamadı.');
+    const headers=matrix[0].map(normalizeUploadHeader);const required=['MUHASEBE KAYIT NO','ISLEM TURU','TARIH','BAGLI KAYIT NO','ADI SOYADI / HESAP','BAGIS / ODEME TURU','ODEYEN','REFERANS','DONEM','TUTAR','ODEME YONTEMI','KASA / BANKA','ACIKLAMA'];const missing=required.filter(h=>!headers.includes(h));if(missing.length)throw new Error('Eksik veya değiştirilmiş başlıklar: '+missing.join(', '));
+    const col={};headers.forEach((h,i)=>col[h]=i);
+    const rows=matrix.slice(1).filter(r=>r.some(v=>String(v||'').trim()!=='')).map(r=>({externalId:r[col['MUHASEBE KAYIT NO']]||'',type:r[col['ISLEM TURU']]||'',date:r[col.TARIH]||'',linkedId:r[col['BAGLI KAYIT NO']]||'',name:r[col['ADI SOYADI / HESAP']]||'',detailType:r[col['BAGIS / ODEME TURU']]||'',payer:r[col.ODEYEN]||'',reference:r[col.REFERANS]||'',period:r[col.DONEM]||'',amount:r[col.TUTAR]||'',method:r[col['ODEME YONTEMI']]||'',account:r[col['KASA / BANKA']]||'',note:r[col.ACIKLAMA]||''}));
+    if(!rows.length)throw new Error('Dosyada aktarılacak hareket bulunamadı.');
+    const result=await server('bulkImportAccounting',state.token,{rows:rows});scheduleDataSync();
+    const summary=`${result.imported} hareket aktarıldı.\n${result.skipped} tekrar kayıt atlandı.\n${result.errors.length} satır hatalı.`;if(result.errors.length)alert(summary+'\n\n'+result.errors.slice(0,20).join('\n'));else toast(summary.replace(/\n/g,' '));
+  }catch(e){alert(e.message);toast(e.message,true)}finally{setBusy(false)}
+}
+async function submitBulkPledges(){
+  const file=$('#fBulkFile').files[0];
+  if(!file){toast('Doldurulmuş şablon dosyasını seçin.',true);return;}
+  if(file.size>2*1024*1024){toast('Dosya 2 MB boyutundan büyük olamaz.',true);return;}
+  setBusy(true);
+  try{
+    const matrix=parseDelimited(await file.text());
+    if(matrix.length<2)throw new Error('Dosyada başlık dışında kayıt bulunamadı.');
+    const headers=matrix[0].map(normalizeUploadHeader);
+    const required=['YIL','FAALIYET','ALT FAALIYET','HESAP ADI','KIMIN ADINA','ILETISIM TEL','REFERANS','REFERANS NEVI','TAKIP EDEN','TAHAKKUK (TL)','ODENEN (TL)','KALAN (TL)','NOTLAR'];
+    const missing=required.filter(h=>!headers.includes(h));
+    if(missing.length)throw new Error('Eksik veya değiştirilmiş başlıklar: '+missing.join(', '));
+    const col={};headers.forEach((h,i)=>col[h]=i);
+    const rows=matrix.slice(1).filter(r=>r.some(v=>String(v||'').trim()!=='')).map(r=>({year:r[col.YIL]||'',activity:r[col.FAALIYET]||'',subActivity:r[col['ALT FAALIYET']]||'',accountCode:'',account:r[col['HESAP ADI']]||'',payer:r[col['KIMIN ADINA']]||'',phone:r[col['ILETISIM TEL']]||'',reference:r[col.REFERANS]||'',type:r[col['REFERANS NEVI']]||'',group:r[col['TAKIP EDEN']]||'',personnel:'',balance:r[col['TAHAKKUK (TL)']]||'',paid:r[col['ODENEN (TL)']]||'',remaining:r[col['KALAN (TL)']]||'',notes:r[col.NOTLAR]||''}));
+    if(!rows.length)throw new Error('Dosyada aktarılacak kayıt bulunamadı.');
+    const result=await server('bulkSavePledges',state.token,{rows:rows});
+    $('#modal').close();toast(`${result.imported} taahhüt ve ${result.openingCollections} açılış tahsilatı eklendi.`);scheduleDataSync();
+  }catch(e){alert(e.message);toast(e.message,true)}finally{setBusy(false)}
+}
+function collectionModal(preselectedId=''){
+  const open=state.data.pledges.filter(x=>x.remaining>0&&x.receivableStatus!=='ŞÜPHELİ');
+  const selected=open.find(x=>x.id===preselectedId);
+  const picker=selected?`<div class="wide selected-pledge-summary"><strong>${esc(selected.fullName)}</strong><span>${esc(selected.donationType)} · ${esc(selected.reference)} · Kalan: ${money(selected.remaining)}</span><input id="pledgePickerSelected" type="hidden" value="${esc(selected.id)}"></div>`:searchPickerHtml('pledgePicker',open,x=>`<strong>${esc(x.fullName)}</strong><span>${esc(x.donationType)} · ${esc(x.reference)} · ${esc(x.personnel||'Personel yok')}</span><span>Kalan: ${money(x.remaining)} · ${esc(x.phone||'Numara yok')}</span>`);
+  const accounts=((state.data.cash&&state.data.cash.accounts)||[]).filter(x=>x.active).map(x=>({value:x.id,label:x.name+(typeof x.balance==='number'?' · '+money(x.balance):'')}));
+  showModal('Tahsilat ekle',formHtml(picker+inputField('Tutar','fAmount','number',false,'min="0.01" step="0.01"')+inputField('Tarih','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}"`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+selectValueField('Kasa / Banka hesabı','fAccount',accounts)+inputField('Açıklama','fNote','text',true),'submitCollection()'));
+}
+function studentCollectionModal(preselectedId=''){
+  const open=(state.data.students?.accruals||[]).filter(x=>x.remaining>0&&x.receivableStatus!=='ŞÜPHELİ');
+  if(!open.length){toast('Tahsilat girilebilecek açık öğrenci tahakkuku bulunamadı.',true);return;}
+  const selected=open.find(x=>x.id===preselectedId);
+  const picker=selected?`<div class="wide selected-pledge-summary"><strong>${esc(selected.fullName)}</strong><span>${esc(selected.donationType)} · ${esc(selected.payer||'Veli bilgisi yok')} · Kalan: ${money(selected.remaining)}</span><input id="pledgePickerSelected" type="hidden" value="${esc(selected.id)}"></div>`:searchPickerHtml('pledgePicker',open,x=>`<strong>${esc(x.fullName)}</strong><span>${esc(x.donationType)} · ${esc(x.payer||'Veli bilgisi yok')}</span><span>Kalan: ${money(x.remaining)} · ${esc(x.phone||'Numara yok')}</span>`);
+  const accounts=((state.data.cash&&state.data.cash.accounts)||[]).filter(x=>x.active).map(x=>({value:x.id,label:x.name+(typeof x.balance==='number'?' · '+money(x.balance):'')}));
+  showModal('Öğrenci tahsilatı ekle',formHtml(picker+inputField('Tutar','fAmount','number',false,'min="0.01" step="0.01"')+inputField('Tarih','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}"`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+selectValueField('Gelirin gireceği kasa / banka','fAccount',accounts)+inputField('Açıklama','fNote','text',true),'submitCollection()'));
+}
+function bulkCollectionModal(){
+  const open=state.data.pledges.filter(x=>x.remaining>0&&x.receivableStatus!=='ŞÜPHELİ').sort((a,b)=>a.fullName.localeCompare(b.fullName,'tr'));
+  if(!open.length){toast('Tahsilat girilebilecek açık taahhüt bulunamadı.',true);return;}
+  const picker=bulkPickerHtml('bulkCollection',open,x=>`<strong>${esc(x.fullName)}</strong><span>${esc(x.donationType)} · ${esc(x.reference)} · ${esc(x.personnel||'Personel yok')}</span><span>Kalan: ${money(x.remaining)}</span>`);
+  const accounts=((state.data.cash&&state.data.cash.accounts)||[]).filter(x=>x.active).map(x=>({value:x.id,label:x.name+(typeof x.balance==='number'?' · '+money(x.balance):'')}));
+  showModal('Toplu tahsilat ekle',formHtml(picker+inputField('Tahsilat tarihi','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}"`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+selectValueField('Gelirin gireceği kasa / banka','fAccount',accounts)+inputField('Ortak açıklama','fNote','text',true),'submitBulkCollections()'));
+}
+async function submitBulkCollections(){
+  let payload;
+  try{const items=collectBulkPickerItems('bulkCollection','pledgeId');const total=items.reduce((s,x)=>s+(Number(x.amount)||0),0);if(!confirm(`${items.length} tahsilat, toplam ${money(total)} olarak kaydedilsin mi?`))return;payload={items:items,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value}}catch(e){toast(e.message,true);return;}
+  setBusy(true);try{const r=await server('saveBulkCollections',state.token,payload);toast(r.approvalStatus==='BEKLİYOR'?`${r.count} tahsilat onaya gönderildi: ${money(r.total)}.`:`${r.count} tahsilat onaylı kaydedildi: ${money(r.total)}.`);scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
+function quickDonationModal(){
+  const admin=isApprover();
+  const refs=(state.data.referenceNames||[]).slice();
+  const referenceField=admin?suggestField('Referans','fReference',refs):'';
+  const accounts=((state.data.cash&&state.data.cash.accounts)||[]).filter(x=>x.active).map(x=>({value:x.id,label:x.name+(typeof x.balance==='number'?' · '+money(x.balance):'')}));
+  const fields=selectField('Bağış türü','fType',state.data.donationTypes)+inputField('Bağışçı / Hesap adı','fName')+inputField('Ödeyen','fPayer')+referenceField+inputField('Tutar','fAmount','number',false,'min="0.01" step="0.01"')+inputField('Tarih','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}"`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+selectValueField('Gelirin gireceği kasa / banka','fAccount',accounts)+inputField('Açıklama','fNote','text',true);
+  showModal('Hızlı bağış ekle',formHtml(fields,'submitQuickDonation()'));
+}
+async function submitQuickDonation(){await submit('saveQuickDonation',{donationType:$('#fType').value,fullName:$('#fName').value,payer:$('#fPayer').value,reference:$('#fReference')?.value||'',amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value})}
+async function submitCollection(){const id=$('#pledgePickerSelected').value;if(!id){toast('Arama sonucundan bir taahhüt seçin.',true);return;}await submit('saveCollection',{pledgeId:id,amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value})}
+function editCollectionModal(id){const x=state.data.collections.find(r=>r.id===id);if(!x)return;const accounts=((state.data.cash&&state.data.cash.accounts)||[]).map(a=>({value:a.id,label:a.name}));let directFields='';if(x.direct){const refs=(state.data.referenceNames||[]).slice();if(!refs.includes(x.reference))refs.unshift(x.reference);directFields=selectField('Bağış türü','fType',state.data.donationTypes.includes(x.donationType)?state.data.donationTypes:[x.donationType,...state.data.donationTypes])+inputField('Bağışçı / Hesap adı','fName','text',false,`value="${esc(x.fullName)}"`)+inputField('Ödeyen','fPayer','text',false,`value="${esc(x.payer||'')}"`)+suggestField('Referans','fReference',refs,x.reference);}showModal(x.direct?'Hızlı bağışı düzelt':'Tahsilatı düzelt',formHtml(directFields+inputField('Tutar','fAmount','number',false,`min="0.01" step="0.01" value="${x.amount}"`)+inputField('Tarih','fDate','date',false,`value="${x.date}"`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+selectValueField('Kasa / Banka hesabı','fAccount',accounts)+inputField('Açıklama','fNote','text',true,`value="${esc(x.note||'')}"`),`submitCollectionEdit('${esc(id)}')`));if(x.direct)$('#fType').value=x.donationType;$('#fMethod').value=x.method;$('#fAccount').value=x.accountId}
+async function submitCollectionEdit(id){await submit('updateCollection',{id,donationType:$('#fType')?.value||'',fullName:$('#fName')?.value||'',payer:$('#fPayer')?.value||'',reference:$('#fReference')?.value||'',amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value})}
+async function removeCollection(id){if(!confirm('Bu tahsilat silinsin mi? İlgili taahhüdün bakiyesi otomatik düzeltilecek.'))return;await submit('deleteCollection',id)}
+function expenseCommitmentModal(kind){
+  if(kind==='teacher'){
+    const fields=inputField('Öğretmen','fName')+inputField('Ders adı','fPayType')+inputField('Dönem','fPeriod')+inputField('Ders saati','fLessonHours','number',false,'min="0.01" step="0.01" oninput="updateTeacherAccrualTotal()"')+inputField('Saatlik ücret','fHourlyRate','number',false,'min="0.01" step="0.01" oninput="updateTeacherAccrualTotal()"')+inputField('Hesaplanan toplam','fTotal','number',false,'readonly value="0"')+inputField('Vade tarihi','fDue','date')+inputField('Açıklama','fNote','text',true);
+    showModal('Öğretmen tahakkuku',formHtml(fields,`submitExpenseCommitment('teacher')`));return;
+  }
+  showModal('Personel tahakkuku',formHtml(inputField('Personel','fName')+inputField('Ödeme türü','fPayType')+inputField('Dönem','fPeriod')+inputField('Toplam tutar','fTotal','number',false,'min="0.01" step="0.01"')+inputField('Vade tarihi','fDue','date')+inputField('Açıklama','fNote','text',true),`submitExpenseCommitment('staff')`));
+}
+function updateTeacherAccrualTotal(){const hours=Number($('#fLessonHours')?.value)||0;const rate=Number($('#fHourlyRate')?.value)||0;if($('#fTotal'))$('#fTotal').value=(Math.round(hours*rate*100)/100).toFixed(2)}
+async function submitExpenseCommitment(kind){const payload={name:$('#fName').value,paymentType:$('#fPayType').value,period:$('#fPeriod').value,total:$('#fTotal').value,dueDate:$('#fDue').value,note:$('#fNote').value};if(kind==='teacher'){payload.lessonHours=$('#fLessonHours').value;payload.hourlyRate=$('#fHourlyRate').value;}await submit('saveExpenseCommitment',kind,payload)}
+function editStaffAccrualModal(id){
+  const x=state.data.staff.commitments.find(r=>r.id===id);if(!x)return;
+  const types=state.data.staffPaymentTypes||[];
+  const typeItems=types.includes(x.paymentType)?types:[x.paymentType,...types];
+  showModal('Personel tahakkukunu düzelt',formHtml(inputField('Personel','fName','text',false,`value="${esc(x.name)}"`)+selectField('Ödeme türü','fPayType',typeItems)+inputField('Dönem','fPeriod','text',false,`value="${esc(x.period)}"`)+inputField('Toplam tahakkuk','fTotal','number',false,`min="${x.paid||0}" step="0.01" value="${x.total}"`)+inputField('Vade tarihi','fDue','date',false,`value="${x.dueDate||''}"`)+inputField('Açıklama','fNote','text',true,`value="${esc(x.note||'')}"`),`submitStaffAccrualEdit('${esc(id)}')`));
+  $('#fPayType').value=x.paymentType;
+}
+async function submitStaffAccrualEdit(id){await submit('updateStaffAccrual',{id:id,name:$('#fName').value,paymentType:$('#fPayType').value,period:$('#fPeriod').value,total:$('#fTotal').value,dueDate:$('#fDue').value,note:$('#fNote').value})}
+async function removeStaffAccrual(id){if(!confirm('Bu personel tahakkuku silinsin mi?'))return;await submit('deleteStaffAccrual',id)}
+function editTeacherAccrualModal(id){
+  const x=state.data.teachers.commitments.find(r=>r.id===id);if(!x)return;
+  const fields=inputField('Öğretmen','fName','text',false,`value="${esc(x.name)}"`)+inputField('Ders adı','fPayType','text',false,`value="${esc(x.paymentType)}"`)+inputField('Dönem','fPeriod','text',false,`value="${esc(x.period)}"`)+inputField('Aylık ders saati','fLessonHours','number',false,`min="0.01" step="0.01" value="${x.lessonHours}" oninput="updateTeacherAccrualTotal()"`)+inputField('Saatlik ücret','fHourlyRate','number',false,`min="0.01" step="0.01" value="${x.hourlyRate}" oninput="updateTeacherAccrualTotal()"`)+inputField('Hesaplanan toplam','fTotal','number',false,`readonly value="${x.total}"`)+inputField('Vade tarihi','fDue','date',false,`value="${x.dueDate||''}"`)+inputField('Açıklama','fNote','text',true,`value="${esc(x.note||'')}"`);
+  showModal('Öğretmen tahakkukunu düzelt',formHtml(fields,`submitTeacherAccrualEdit('${esc(id)}')`));
+}
+async function submitTeacherAccrualEdit(id){await submit('updateTeacherAccrual',{id:id,name:$('#fName').value,paymentType:$('#fPayType').value,period:$('#fPeriod').value,lessonHours:$('#fLessonHours').value,hourlyRate:$('#fHourlyRate').value,dueDate:$('#fDue').value,note:$('#fNote').value})}
+async function removeTeacherAccrual(id){if(!confirm('Bu öğretmen tahakkuku silinsin mi?'))return;await submit('deleteTeacherAccrual',id)}
+function expensePaymentModal(kind){
+  const d=kind==='staff'?state.data.staff:state.data.teachers;const source=kind==='staff'?staffScopedCommitments():d.commitments;const open=source.filter(x=>x.remaining>0);
+  const picker=searchPickerHtml('expensePicker',open,x=>`<strong>${esc(x.name)}</strong><span>${esc(x.paymentType)} · ${esc(x.period)}</span><span>Kalan: ${money(x.remaining)}${kind==='teacher'?` · ${x.lessonHours} saat × ${money(x.hourlyRate)}`:''}</span>`);
+  const accounts=((state.data.cash&&state.data.cash.accounts)||[]).filter(x=>x.active).map(x=>({value:x.id,label:x.name+' · '+money(x.balance)}));
+  showModal((kind==='staff'?'Personel':'Öğretmen')+' ödemesi ekle',formHtml(picker+inputField('Tutar','fAmount','number',false,'min="0.01" step="0.01"')+inputField('Tarih','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}"`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+selectValueField('Ödemenin çıkacağı kasa / banka','fAccount',accounts)+inputField('Açıklama','fNote','text',true),`submitExpensePayment('${kind}')`));
+}
+function bulkStaffPaymentModal(){
+  const open=staffScopedCommitments().filter(x=>x.remaining>0).sort((a,b)=>a.name.localeCompare(b.name,'tr'));
+  if(!open.length){toast('Ödeme yapılabilecek açık personel tahakkuku bulunamadı.',true);return;}
+  const picker=bulkPickerHtml('bulkStaffPayment',open,x=>`<strong>${esc(x.name)}</strong><span>${esc(x.paymentType)} · ${esc(x.period)}</span><span>Kalan: ${money(x.remaining)}</span>`);
+  const accounts=((state.data.cash&&state.data.cash.accounts)||[]).filter(x=>x.active).map(x=>({value:x.id,label:x.name+' · '+money(x.balance)}));
+  showModal('Toplu personel ödemesi',formHtml(picker+inputField('Ödeme tarihi','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}"`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+selectValueField('Ödemenin çıkacağı kasa / banka','fAccount',accounts)+inputField('Ortak açıklama','fNote','text',true),'submitBulkStaffPayments()'));
+}
+async function submitBulkStaffPayments(){
+  let payload;
+  try{const items=collectBulkPickerItems('bulkStaffPayment','commitmentId');const total=items.reduce((s,x)=>s+(Number(x.amount)||0),0);if(!confirm(`${items.length} personel ödemesi, toplam ${money(total)} olarak kaydedilsin mi?`))return;payload={items:items,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value}}catch(e){toast(e.message,true);return;}
+  setBusy(true);try{const r=await server('saveBulkExpensePayments',state.token,'staff',payload);toast(`${r.count} personel ödemesi kaydedildi: ${money(r.total)}. Veriler eşitleniyor.`);scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
+async function submitExpensePayment(kind){const id=$('#expensePickerSelected').value;if(!id){toast('Arama sonucundan bir tahakkuk seçin.',true);return;}await submit('saveExpensePayment',kind,{commitmentId:id,amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value})}
+function editExpensePaymentModal(kind,id){const d=kind==='staff'?state.data.staff:state.data.teachers;const x=d.payments.find(r=>r.id===id);if(!x)return;const accounts=((state.data.cash&&state.data.cash.accounts)||[]).map(a=>({value:a.id,label:a.name+' · '+money(a.balance)}));showModal('Ödemeyi düzelt',formHtml(inputField('Tutar','fAmount','number',false,`min="0.01" step="0.01" value="${x.amount}"`)+inputField('Tarih','fDate','date',false,`value="${x.date}"`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+selectValueField('Ödemenin çıkacağı kasa / banka','fAccount',accounts)+inputField('Açıklama','fNote','text',true,`value="${esc(x.note||'')}"`),`submitExpensePaymentEdit('${kind}','${esc(id)}')`));$('#fMethod').value=x.method;$('#fAccount').value=x.accountId}
+async function submitExpensePaymentEdit(kind,id){await submit('updateExpensePayment',kind,{id,amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value})}
+async function removeExpensePayment(kind,id){if(!confirm('Bu ödeme hareketi silinsin mi? İlgili kalan bakiye otomatik düzeltilecek.'))return;await submit('deleteExpensePayment',kind,id)}
+async function downloadTeacherReceipt(id){
+  setBusy(true);
+  try{const r=await server('generateTeacherPaymentReceiptPdf',state.token,id);downloadBase64File(r);toast('Öğretmen ödeme dekontu indirildi.')}catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
+function staffPlanModal(){
+  const types=state.data.staffPaymentTypes||['Hediye','Kira veya Ev Yardımı','Yol','Sosyal Yardım'];
+  const amountFields=types.map((type,i)=>inputField(type+' aylık tutarı','fPlanAmount'+i,'number',false,'min="0" step="0.01" placeholder="0,00"')).join('');
+  showModal('Personel aylık ödeme planı',formHtml(inputField('Personel','fName')+amountFields+inputField('Açıklama','fNote','text',true),'submitStaffPlan()'));
+}
+async function submitStaffPlan(){
+  const types=state.data.staffPaymentTypes||[];
+  const amounts={};
+  types.forEach((type,i)=>amounts[type]=$('#fPlanAmount'+i).value);
+  await submit('saveStaffPlanSet',{name:$('#fName').value,amounts:amounts,note:$('#fNote').value});
+}
+function editStaffPlanModal(id){const x=(state.data.staffPlans||[]).find(r=>r.id===id);if(!x)return;const types=state.data.staffPaymentTypes||[];showModal('Personel aylık planını düzelt',formHtml(inputField('Personel','fName','text',false,`value="${esc(x.name)}"`)+selectField('Ödeme türü','fPayType',types.includes(x.paymentType)?types:[x.paymentType,...types])+inputField('Aylık tutar','fAmount','number',false,`min="0.01" step="0.01" value="${x.amount}"`)+inputField('Açıklama','fNote','text',true,`value="${esc(x.note||'')}"`),`submitStaffPlanEdit('${esc(id)}')`));$('#fPayType').value=x.paymentType}
+async function submitStaffPlanEdit(id){await submit('updateStaffPlan',{id:id,name:$('#fName').value,paymentType:$('#fPayType').value,amount:$('#fAmount').value,note:$('#fNote').value})}
+function staffTypeChecks(prefix){
+  const types=state.data.staffPaymentTypes||[];
+  return `<fieldset class="wide check-field"><legend>Ödeme türleri</legend><div class="check-grid">${types.map((type,i)=>`<label class="check-item"><input id="${prefix}Type${i}" type="checkbox" value="${esc(type)}" checked><span>${esc(type)}</span></label>`).join('')}</div></fieldset>`;
+}
+function staffScopeFields(prefix){
+  const names=state.data.staffNames||[];
+  return `<label>Kapsam<select id="${prefix}Scope" onchange="toggleStaffScope('${prefix}')"><option value="all">Tüm personel</option><option value="one">Tek personel</option></select></label><label id="${prefix}PersonWrap" class="hidden">Personel<select id="${prefix}Person">${names.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('')}</select></label>`;
+}
+function toggleStaffScope(prefix){
+  const one=$('#'+prefix+'Scope').value==='one';
+  $('#'+prefix+'PersonWrap').classList.toggle('hidden',!one);
+}
+function selectedStaffTypes(prefix){
+  return [...document.querySelectorAll(`[id^="${prefix}Type"]:checked`)].map(x=>x.value);
+}
+function currentMonthValue(offset=0){
+  const d=new Date();
+  d.setDate(1);d.setMonth(d.getMonth()+offset);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+function staffMonthModal(){
+  showModal('Toplu personel tahakkuku',formHtml(inputField('Tahakkuk ayı','fMonth','month',false,`value="${currentMonthValue()}"`)+inputField('Vade tarihi','fDue','date')+staffScopeFields('accrual')+staffTypeChecks('accrual'),'submitStaffMonth()'));
+}
+async function submitStaffMonth(){
+  const types=selectedStaffTypes('accrual');
+  if(!types.length){toast('En az bir ödeme türü seçin.',true);return;}
+  const staffName=$('#accrualScope').value==='one'?$('#accrualPerson').value:'';
+  setBusy(true);
+  try{
+    const r=await server('generateMonthlyStaffCommitments',state.token,{month:$('#fMonth').value,dueDate:$('#fDue').value,staffName:staffName,paymentTypes:types});
+    $('#modal').close();state.expenseTab.staff='commitments';toast(`${r.period}: ${r.created} tahakkuk oluşturuldu, ${r.skipped} kayıt zaten vardı.`);scheduleDataSync();
+  }catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
+function copyStaffMonthModal(){
+  showModal('Personel tahakkuklarını aya kopyala',formHtml(inputField('Kaynak ay','fSourceMonth','month',false,`value="${currentMonthValue(-1)}"`)+inputField('Hedef ay','fTargetMonth','month',false,`value="${currentMonthValue()}"`)+inputField('Hedef vade tarihi','fCopyDue','date')+staffScopeFields('copy')+staffTypeChecks('copy'),'submitCopyStaffMonth()'));
+}
+async function submitCopyStaffMonth(){
+  const types=selectedStaffTypes('copy');
+  if(!types.length){toast('En az bir ödeme türü seçin.',true);return;}
+  const staffName=$('#copyScope').value==='one'?$('#copyPerson').value:'';
+  setBusy(true);
+  try{
+    const r=await server('copyStaffCommitmentsMonth',state.token,{sourceMonth:$('#fSourceMonth').value,targetMonth:$('#fTargetMonth').value,dueDate:$('#fCopyDue').value,staffName:staffName,paymentTypes:types});
+    $('#modal').close();state.expenseTab.staff='commitments';toast(`${r.sourcePeriod} kayıtları ${r.targetPeriod} dönemine kopyalandı: ${r.created} yeni, ${r.skipped} mevcut.`);scheduleDataSync();
+  }catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
+async function toggleStaffPlan(id,active){await submit('setStaffPlanActive',id,active)}
+function teacherPlanModal(){
+  const fields=inputField('Öğretmen','fTeacherName')+inputField('Ders adı','fLessonName')+inputField('Aylık ders saati','fTeacherHours','number',false,'min="0.01" step="0.01" oninput="updateTeacherPlanTotal()"')+inputField('Saatlik ücret','fTeacherRate','number',false,'min="0.01" step="0.01" oninput="updateTeacherPlanTotal()"')+inputField('Aylık tahakkuk','fTeacherTotal','number',false,'readonly value="0"')+inputField('Açıklama','fTeacherNote','text',true);
+  showModal('Öğretmen aylık planı',formHtml(fields,'submitTeacherPlan()'));
+}
+function updateTeacherPlanTotal(){const hours=Number($('#fTeacherHours')?.value)||0;const rate=Number($('#fTeacherRate')?.value)||0;if($('#fTeacherTotal'))$('#fTeacherTotal').value=(Math.round(hours*rate*100)/100).toFixed(2)}
+async function submitTeacherPlan(){await submit('saveTeacherPlan',{name:$('#fTeacherName').value,lessonName:$('#fLessonName').value,lessonHours:$('#fTeacherHours').value,hourlyRate:$('#fTeacherRate').value,note:$('#fTeacherNote').value})}
+function editTeacherPlanModal(id){const x=(state.data.teacherPlans||[]).find(r=>r.id===id);if(!x)return;const fields=inputField('Öğretmen','fTeacherName','text',false,`value="${esc(x.name)}"`)+inputField('Ders adı','fLessonName','text',false,`value="${esc(x.lessonName)}"`)+inputField('Aylık ders saati','fTeacherHours','number',false,`min="0.01" step="0.01" value="${x.lessonHours}" oninput="updateTeacherPlanTotal()"`)+inputField('Saatlik ücret','fTeacherRate','number',false,`min="0.01" step="0.01" value="${x.hourlyRate}" oninput="updateTeacherPlanTotal()"`)+inputField('Aylık tahakkuk','fTeacherTotal','number',false,`readonly value="${x.amount}"`)+inputField('Açıklama','fTeacherNote','text',true,`value="${esc(x.note||'')}"`);showModal('Öğretmen aylık planını düzelt',formHtml(fields,`submitTeacherPlanEdit('${esc(id)}')`))}
+async function submitTeacherPlanEdit(id){await submit('updateTeacherPlan',{id:id,name:$('#fTeacherName').value,lessonName:$('#fLessonName').value,lessonHours:$('#fTeacherHours').value,hourlyRate:$('#fTeacherRate').value,note:$('#fTeacherNote').value})}
+function teacherScopeFields(prefix){
+  const names=state.data.teacherNames||[];
+  return `<label>Kapsam<select id="${prefix}Scope" onchange="toggleTeacherScope('${prefix}')"><option value="all">Tüm öğretmenler</option><option value="one">Tek öğretmen</option></select></label><label id="${prefix}TeacherWrap" class="hidden">Öğretmen<select id="${prefix}Teacher">${names.map(name=>`<option value="${esc(name)}">${esc(name)}</option>`).join('')}</select></label>`;
+}
+function toggleTeacherScope(prefix){const one=$('#'+prefix+'Scope').value==='one';$('#'+prefix+'TeacherWrap').classList.toggle('hidden',!one)}
+function teacherMonthModal(){showModal('Toplu öğretmen tahakkuku',formHtml(inputField('Tahakkuk ayı','fTeacherMonth','month',false,`value="${currentMonthValue()}"`)+inputField('Vade tarihi','fTeacherDue','date')+teacherScopeFields('teacherAccrual'),'submitTeacherMonth()'))}
+async function submitTeacherMonth(){
+  const teacherName=$('#teacherAccrualScope').value==='one'?$('#teacherAccrualTeacher').value:'';
+  setBusy(true);
+  try{const r=await server('generateMonthlyTeacherAccruals',state.token,{month:$('#fTeacherMonth').value,dueDate:$('#fTeacherDue').value,teacherName:teacherName});$('#modal').close();state.expenseTab.teacher='commitments';toast(`${r.period}: ${r.created} öğretmen tahakkuku oluşturuldu, ${r.skipped} kayıt zaten vardı.`);scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
+function copyTeacherMonthModal(){showModal('Öğretmen tahakkuklarını aya kopyala',formHtml(inputField('Kaynak ay','fTeacherSourceMonth','month',false,`value="${currentMonthValue(-1)}"`)+inputField('Hedef ay','fTeacherTargetMonth','month',false,`value="${currentMonthValue()}"`)+inputField('Hedef vade tarihi','fTeacherCopyDue','date')+teacherScopeFields('teacherCopy'),'submitCopyTeacherMonth()'))}
+async function submitCopyTeacherMonth(){
+  const teacherName=$('#teacherCopyScope').value==='one'?$('#teacherCopyTeacher').value:'';
+  setBusy(true);
+  try{const r=await server('copyTeacherAccrualsMonth',state.token,{sourceMonth:$('#fTeacherSourceMonth').value,targetMonth:$('#fTeacherTargetMonth').value,dueDate:$('#fTeacherCopyDue').value,teacherName:teacherName});$('#modal').close();state.expenseTab.teacher='commitments';toast(`${r.sourcePeriod} kayıtları ${r.targetPeriod} dönemine kopyalandı: ${r.created} yeni, ${r.skipped} mevcut.`);scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
+async function toggleTeacherPlan(id,active){await submit('setTeacherPlanActive',id,active)}
+function userModal(){showModal('Yeni kullanıcı',formHtml(inputField('Ad Soyad','fName')+inputField('E-posta','fEmail','email')+selectField('Kategori','fRole',['KULLANICI','MUHASEBE SORUMLUSU','YÖNETİCİ'])+inputField('Referans adı','fReference')+inputField('Geçici PIN (6-8 rakam)','fPin','password',false,'inputmode="numeric" minlength="6" maxlength="8"'),'submitUser()'))}
+async function submitUser(){await submit('saveUser',{name:$('#fName').value,email:$('#fEmail').value,role:$('#fRole').value,reference:$('#fReference').value,pin:$('#fPin').value})}
+function editUserModal(id){const x=state.data.users.find(r=>r.id===id);if(!x)return;const fields=inputField('Ad Soyad','fName','text',false,`value="${esc(x.name)}"`)+inputField('E-posta','fEmail','email',false,`value="${esc(x.email)}"`)+selectField('Kategori','fRole',['KULLANICI','MUHASEBE SORUMLUSU','YÖNETİCİ'])+inputField('Referans adı','fReference','text',false,`value="${esc(x.reference||'')}"`)+inputField('Yeni PIN (değişmeyecekse boş; 6-8 rakam)','fPin','password',false,'inputmode="numeric" minlength="6" maxlength="8"');showModal('Kullanıcıyı düzenle',formHtml(fields,`submitUserEdit('${esc(id)}')`));$('#fRole').value=x.role}
+async function submitUserEdit(id){await submit('updateUser',{id:id,name:$('#fName').value,email:$('#fEmail').value,role:$('#fRole').value,reference:$('#fReference').value,pin:$('#fPin').value})}
+async function toggleUser(id,active){if(!confirm(active?'Kullanıcı aktif yapılsın mı?':'Kullanıcı pasif yapılsın mı?'))return;await submit('setUserActive',id,active)}
+async function submit(method,...args){if($('#modal').open)$('#modal').close();setBusy(true);try{const result=await server(method,state.token,...args);toast(result&&result.approvalStatus==='BEKLİYOR'?'Tahsilat onaya gönderildi.':'İşlem kaydedildi. Veriler eşitleniyor.');scheduleDataSync();return result}catch(e){toast(e.message,true);return null}finally{setBusy(false)}}
+boot();
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}
