@@ -38,9 +38,9 @@ const HEADERS = Object.freeze({
   users: ['Kullanıcı ID','Ad Soyad','E-posta','Rol','Referans Adı','PIN Salt','PIN Özeti','Aktif','Oluşturma Tarihi'],
   types: ['Bağış Türü','Aktif'],
   pledges: ['Taahhüt ID','Yıl','Bağış Türü','Ad Soyad','Telefon','Ödeyen','Referans','Taahhüt Tutarı','Ödenen','Kalan','Durum','Taahhüt Tarihi','Oluşturan','Oluşturma Zamanı','Personel','Alacak Durumu','Kayıt Kaynağı','Faaliyet','Alt Faaliyet','Hesap Kodu','Grubu','Notlar'],
-  collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni','Makbuz No','Grubu','Faaliyet','Telefon'],
+  collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni','Makbuz No','Grubu','Faaliyet','Telefon','Döviz Cinsi','Döviz Tutarı','Döviz Kuru'],
   referenceTargets: ['Hedef ID','Başlangıç','Bitiş','Referans','Teberru Hedefi','Tahsilat Hedefi','Aktif','Açıklama','Oluşturma Zamanı','Hedef Türü'],
-  cashAccounts: ['Hesap ID','Hesap Adı','Hesap Türü','Açılış Bakiyesi','Aktif','Açıklama','Oluşturma Zamanı'],
+  cashAccounts: ['Hesap ID','Hesap Adı','Hesap Türü','Açılış Bakiyesi','Aktif','Açıklama','Oluşturma Zamanı','Para Birimi','Açılış Döviz','Açılış Kuru'],
   loans: ['Borç ID','Alım Tarihi','Borç Veren','Alınan Tutar','Geri Ödenen','Kalan Borç','Durum','Hesap ID','Hesap Adı','Açıklama','Oluşturma Zamanı'],
   loanRepayments: ['Hareket ID','Tarih','Borç ID','Borç Veren','Tutar','Ödeme Yöntemi','Açıklama','Oluşturma Zamanı','Hesap ID','Hesap Adı'],
   staffPlans: ['Plan ID','Personel','Ödeme Türü','Aylık Tutar','Aktif','Açıklama','Oluşturma Zamanı'],
@@ -156,6 +156,8 @@ function upgradeSystem() {
   if (!ss.getSheetByName(APP.sheets.currentExpenses)) createSheet_(ss, APP.sheets.currentExpenses, HEADERS.currentExpenses);
   if (!ss.getSheetByName(APP.sheets.currentExpensePayments)) createSheet_(ss, APP.sheets.currentExpensePayments, HEADERS.currentExpensePayments);
   if (!ss.getSheetByName(APP.sheets.receiptExpenses)) createSheet_(ss, APP.sheets.receiptExpenses, HEADERS.receiptExpenses);
+  ensureSheetHeaders_(ss.getSheetByName(APP.sheets.collections), HEADERS.collections);
+  ensureSheetHeaders_(ss.getSheetByName(APP.sheets.cashAccounts), HEADERS.cashAccounts);
   const referenceTargets = ss.getSheetByName(APP.sheets.referenceTargets);
   if (referenceTargets.getLastColumn() < HEADERS.referenceTargets.length) {
     const start = referenceTargets.getLastColumn() + 1;
@@ -1045,7 +1047,6 @@ function bulkSavePledges(token, payload) {
 
   const pledgeRows = [];
   const collectionRows = [];
-  let directDonationCount = 0;
   const errors = [];
   sourceRows.forEach(function(item, index) {
     try {
@@ -1071,29 +1072,16 @@ function bulkSavePledges(token, payload) {
       if (!type) throw new Error('REFERANS NEVİ boş olamaz');
       if (!account) throw new Error('HESAP ADI boş olamaz');
       if (!reference) throw new Error('REFERANS boş olamaz');
-      if (!isFinite(balance) || balance < 0) throw new Error('TAHAKKUK (TL) negatif olamaz');
+      if (!isFinite(balance) || balance <= 0) throw new Error('TAHAKKUK (TL) sıfırdan büyük olmalıdır');
       if (!isFinite(paid) || paid < 0) throw new Error('ÖDENEN (TL) geçersiz');
-      const directDonation = balance === 0;
-      if (directDonation && paid <= 0) throw new Error('Teberru için ÖDENEN (TL) sıfırdan büyük olmalıdır');
-      if (!directDonation && paid > balance) throw new Error('ÖDENEN (TL), TAHAKKUK (TL) tutarından büyük olamaz');
+      if (paid > balance) throw new Error('ÖDENEN (TL), TAHAKKUK (TL) tutarından büyük olamaz');
       const remaining = Math.round((balance - paid) * 100) / 100;
-      const expectedRemaining = directDonation ? 0 : remaining;
-      if (suppliedRemaining != null && (!isFinite(suppliedRemaining) || Math.abs(suppliedRemaining - expectedRemaining) > 0.01)) {
+      if (suppliedRemaining != null && (!isFinite(suppliedRemaining) || Math.abs(suppliedRemaining - remaining) > 0.01)) {
         throw new Error('KALAN (TL), TAHAKKUK (TL) - ÖDENEN (TL) ile uyuşmuyor');
       }
 
-      const pledgeDate = new Date(year, 0, 1, 12, 0, 0);
-      if (directDonation) {
-        collectionRows.push([
-          makeId_('HBG'), pledgeDate, '', account, type, reference, payer, paid,
-          'Devir', 'Toplu aktarımdan doğrudan teberru', session.email, new Date(),
-          'HSP-DEVIR', 'Devir / Belirsiz', 'ONAYLANDI', session.email, new Date(), '', '', group, activity, phone
-        ]);
-        directDonationCount++;
-        return;
-      }
-
       const id = makeId_('TAA');
+      const pledgeDate = new Date(year, 0, 1, 12, 0, 0);
       pledgeRows.push([
         id, year, type, account, phone, payer, reference, balance, paid, remaining,
         remaining <= 0 ? 'Kapandı' : (paid > 0 ? 'Kısmi' : 'Ödenmedi'),
@@ -1120,14 +1108,14 @@ function bulkSavePledges(token, payload) {
       const added = HEADERS.pledges.slice(start - 1);
       pledgeSheet.getRange(1, start, 1, added.length).setValues([added]).setFontWeight('bold').setFontColor('#ffffff').setBackground('#163A5F');
     }
-    if (pledgeRows.length) pledgeSheet.getRange(pledgeSheet.getLastRow() + 1, 1, pledgeRows.length, HEADERS.pledges.length).setValues(pledgeRows);
+    pledgeSheet.getRange(pledgeSheet.getLastRow() + 1, 1, pledgeRows.length, HEADERS.pledges.length).setValues(pledgeRows);
     if (collectionRows.length) {
       const collectionSheet = ss.getSheetByName(APP.sheets.collections);
       collectionSheet.getRange(collectionSheet.getLastRow() + 1, 1, collectionRows.length, HEADERS.collections.length).setValues(fitRowsWidth_(collectionRows, HEADERS.collections.length));
     }
-    audit_(session.email, 'TOPLU_EKLENDİ', 'Taahhüt / Teberru', '', pledgeRows.length + ' taahhüt / ' + directDonationCount + ' teberru / ' + (collectionRows.length - directDonationCount) + ' açılış tahsilatı');
+    audit_(session.email, 'TOPLU_EKLENDİ', 'Taahhüt', '', pledgeRows.length + ' kayıt / ' + collectionRows.length + ' açılış tahsilatı');
   });
-  return { imported:pledgeRows.length, openingCollections:collectionRows.length - directDonationCount, directDonations:directDonationCount };
+  return { imported:pledgeRows.length, openingCollections:collectionRows.length };
 }
 
 function bulkImportAccounting(token, payload) {
@@ -1360,6 +1348,31 @@ function pendingAmountForPledge_(pledgeId, excludeCollectionId) {
   }).reduce(function(sum, r) { return sum + (Number(r[7]) || 0); }, 0);
 }
 
+function ensureSheetHeaders_(sheet, headers) {
+  if (!sheet) throw new Error('Veri sayfası bulunamadı.');
+  if (sheet.getLastColumn() < headers.length) sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
+}
+
+function collectionFxMeta_(payload, account, tlAmount) {
+  const isFx = String(account && account.values && account.values[2] || '').toUpperCase() === 'DÖVİZ';
+  if (!isFx) return { currency:'', foreignAmount:'', exchangeRate:'' };
+  const currency = cleanText_(payload.currency || account.values[7] || 'USD', 10).toUpperCase();
+  if (currency !== 'USD') throw new Error('Şu anda döviz hesabında yalnızca USD kullanılabilir.');
+  const foreignAmount = positiveNumber_(payload.foreignAmount, 'Dolar tutarı');
+  const exchangeRate = positiveNumber_(payload.exchangeRate, 'Dolar kuru');
+  const calculated = Math.round(foreignAmount * exchangeRate * 100) / 100;
+  if (Math.abs(calculated - tlAmount) > 0.02) throw new Error('TL karşılığı, dolar tutarı × kur ile eşleşmelidir. Hesaplanan: ' + moneyText_(calculated));
+  return { currency:currency, foreignAmount:foreignAmount, exchangeRate:exchangeRate };
+}
+
+function collectionRowWithFx_(row, fx) {
+  while (row.length < 22) row.push('');
+  row[22] = fx.currency || '';
+  row[23] = fx.foreignAmount === '' ? '' : fx.foreignAmount;
+  row[24] = fx.exchangeRate === '' ? '' : fx.exchangeRate;
+  return row;
+}
+
 function saveCollection(token, payload) {
   const session = requireSession_(token);
   payload = payload || {};
@@ -1378,11 +1391,14 @@ function saveCollection(token, payload) {
     if (amount > available) throw new Error('Tahsilat, kalan ve onay bekleyen kayıtlar dikkate alındığında kullanılabilir ' + moneyText_(available) + ' tutarından büyük olamaz.');
     const account = findRowBy_(APP.sheets.cashAccounts, 1, accountId);
     if (!account || account.values[4] !== true) throw new Error('Aktif bir kasa veya banka hesabı seçin.');
+    const fx = collectionFxMeta_(payload, account, amount);
     const ss = getDb_();
-    appendRows_(ss.getSheetByName(APP.sheets.collections), [[
+    const collectionSheet = ss.getSheetByName(APP.sheets.collections);
+    ensureSheetHeaders_(collectionSheet, HEADERS.collections);
+    appendRows_(collectionSheet, [collectionRowWithFx_([
       id, date, current.values[0], current.values[3], current.values[2], current.values[6],
       current.values[5], amount, cleanText_(payload.method, 50), cleanText_(payload.note, 300), session.email, new Date(), account.values[0], account.values[1]
-    ].concat(collectionApprovalMeta_(session))], HEADERS.collections.length);
+    ].concat(collectionApprovalMeta_(session)), fx)], HEADERS.collections.length);
     if (isApproverSession_(session)) {
       resetRequestCache_();
       recalculatePledge_(pledgeId);
@@ -1410,6 +1426,7 @@ function saveBulkCollections(token, payload) {
     resetRequestCache_();
     const account = findRowBy_(APP.sheets.cashAccounts, 1, accountId);
     if (!account || account.values[4] !== true) throw new Error('Aktif bir kasa veya banka hesabı seçin.');
+    if (String(account.values[2] || '').toUpperCase() === 'DÖVİZ') throw new Error('Toplu tahsilatta döviz hesabı kullanılamaz. Dolar tahsilatlarını kur bilgisiyle tek tek girin.');
     const pledgeRows = dataRows_(APP.sheets.pledges);
     const pledgeMap = {};
     pledgeRows.forEach(function(r, index) { pledgeMap[String(r[0])] = { values:r, index:index }; });
@@ -1471,12 +1488,15 @@ function saveQuickDonation(token, payload) {
   const account = findRowBy_(APP.sheets.cashAccounts, 1, cleanText_(payload.accountId, 60));
   if (!donationType || !fullName || !reference) throw new Error('Bağış türü, bağışçı ve referans zorunludur.');
   if (!account || account.values[4] !== true) throw new Error('Aktif bir kasa veya banka hesabı seçin.');
+  const fx = collectionFxMeta_(payload, account, amount);
   const id = makeId_('HBG');
   withLock_(function() {
-    appendRows_(getDb_().getSheetByName(APP.sheets.collections), [[
+    const collectionSheet = getDb_().getSheetByName(APP.sheets.collections);
+    ensureSheetHeaders_(collectionSheet, HEADERS.collections);
+    appendRows_(collectionSheet, [collectionRowWithFx_([
       id, date, '', fullName, donationType, reference, cleanText_(payload.payer, 120), amount,
       cleanText_(payload.method, 50), cleanText_(payload.note, 300), session.email, new Date(), account.values[0], account.values[1]
-    ].concat(collectionApprovalMeta_(session))], HEADERS.collections.length);
+    ].concat(collectionApprovalMeta_(session)), fx)], HEADERS.collections.length);
     audit_(session.email, isApproverSession_(session) ? 'HIZLI_BAĞIŞ_ONAYLANDI' : 'HIZLI_BAĞIŞ_ONAYA_GÖNDERİLDİ', 'Doğrudan Gelir', id, fullName + ' / ' + amount + ' TL / ' + account.values[1]);
   });
   return {ok:true, approvalStatus:isApproverSession_(session)?'ONAYLANDI':'BEKLİYOR'};
@@ -1490,6 +1510,7 @@ function updateCollection(token, payload) {
   const date = parseDate_(payload.date, 'Tahsilat tarihi');
   const account = findRowBy_(APP.sheets.cashAccounts, 1, cleanText_(payload.accountId, 60));
   if (!account || account.values[4] !== true) throw new Error('Aktif bir kasa veya banka hesabı seçin.');
+  const fx = collectionFxMeta_(payload, account, amount);
   withLock_(function() {
     const current = findRowBy_(APP.sheets.collections, 1, id);
     if (!current) throw new Error('Tahsilat bulunamadı.');
@@ -1522,6 +1543,8 @@ function updateCollection(token, payload) {
     if (directMeta) sh.getRange(current.row, 4, 1, 4).setValues([directMeta]);
     sh.getRange(current.row, 8, 1, 3).setValues([[amount, cleanText_(payload.method, 50), cleanText_(payload.note, 300)]]);
     sh.getRange(current.row, 13, 1, 2).setValues([[account.values[0], account.values[1]]]);
+    ensureSheetHeaders_(sh, HEADERS.collections);
+    sh.getRange(current.row, 23, 1, 3).setValues([[fx.currency, fx.foreignAmount, fx.exchangeRate]]);
     resetRequestCache_();
     if (pledge) recalculatePledge_(pledgeId);
     audit_(session.email, 'DÜZELTİLDİ', 'Tahsilat', id, amount + ' TL');
@@ -1544,6 +1567,7 @@ function bulkUpdateCollections(token, payload) {
   withLock_(function() {
     const ss = getDb_();
     const sh = ss.getSheetByName(APP.sheets.collections);
+    ensureSheetHeaders_(sh, HEADERS.collections);
     const lastRow = sh.getLastRow();
     if (lastRow < 2) throw new Error('Tahsilat kaydı bulunamadı.');
     const rows = sh.getRange(2, 1, lastRow - 1, HEADERS.collections.length).getValues();
@@ -1583,6 +1607,7 @@ function bulkUpdateCollections(token, payload) {
       const accountId = has('accountId') ? cleanText_(changes.accountId, 60) : String(row[12] || '');
       const account = accounts[accountId];
       if (!account || account[4] !== true) throw new Error(id + ': aktif bir kasa veya banka hesabı seçin.');
+      if (String(account[2] || '').toUpperCase() === 'DÖVİZ' && (!row[22] || has('accountId') || has('amount'))) throw new Error(id + ': Döviz hesabına geçiş veya döviz tutarı değişikliği tekli Düzelt penceresinden kur bilgisiyle yapılmalıdır.');
       row[12] = account[0];
       row[13] = account[1];
 
@@ -1942,8 +1967,17 @@ function saveCashAccount(token, payload) {
   const opening = flexibleNumber_(payload.openingBalance);
   if (!name || !type) throw new Error('Hesap adı ve hesap türü zorunludur.');
   if (!isFinite(opening) || opening < 0) throw new Error('Açılış bakiyesi sıfırdan küçük olamaz.');
+  const isFx = type.toUpperCase() === 'DÖVİZ';
+  const currency = isFx ? cleanText_(payload.currency || 'USD', 10).toUpperCase() : '';
+  const openingForeign = isFx ? nonNegativeNumber_(payload.openingForeign || 0, 'Açılış dolar bakiyesi') : '';
+  const openingRate = isFx ? nonNegativeNumber_(payload.openingRate || 0, 'Açılış kuru') : '';
+  if (isFx && currency !== 'USD') throw new Error('Şu anda yalnızca USD döviz hesabı desteklenir.');
+  if (isFx && openingForeign > 0 && openingRate <= 0) throw new Error('Açılış dolar bakiyesi için kur girin.');
+  if (isFx && Math.abs(Math.round(openingForeign * openingRate * 100) / 100 - opening) > 0.02) throw new Error('Açılış TL karşılığı, dolar bakiyesi × kur ile eşleşmelidir.');
   const id = makeId_('HSP');
-  getDb_().getSheetByName(APP.sheets.cashAccounts).appendRow([id, name, type, Math.round(opening*100)/100, true, cleanText_(payload.note, 300), new Date()]);
+  const sheet = getDb_().getSheetByName(APP.sheets.cashAccounts);
+  ensureSheetHeaders_(sheet, HEADERS.cashAccounts);
+  appendRows_(sheet, [[id, name, type, Math.round(opening*100)/100, true, cleanText_(payload.note, 300), new Date(), currency, openingForeign, openingRate]], HEADERS.cashAccounts.length);
   audit_(session.email, 'EKLENDİ', 'Kasa/Banka Hesabı', id, name);
   return {ok:true};
 }
@@ -1959,11 +1993,20 @@ function updateCashAccount(token, payload) {
   const opening = flexibleNumber_(payload.openingBalance);
   if (!name || !type) throw new Error('Hesap adı ve hesap türü zorunludur.');
   if (!isFinite(opening) || opening < 0) throw new Error('Açılış bakiyesi sıfırdan küçük olamaz.');
+  const isFx = type.toUpperCase() === 'DÖVİZ';
+  const currency = isFx ? cleanText_(payload.currency || row.values[7] || 'USD', 10).toUpperCase() : '';
+  const openingForeign = isFx ? nonNegativeNumber_(payload.openingForeign || 0, 'Açılış dolar bakiyesi') : '';
+  const openingRate = isFx ? nonNegativeNumber_(payload.openingRate || 0, 'Açılış kuru') : '';
+  if (isFx && currency !== 'USD') throw new Error('Şu anda yalnızca USD döviz hesabı desteklenir.');
+  if (isFx && openingForeign > 0 && openingRate <= 0) throw new Error('Açılış dolar bakiyesi için kur girin.');
+  if (isFx && Math.abs(Math.round(openingForeign * openingRate * 100) / 100 - opening) > 0.02) throw new Error('Açılış TL karşılığı, dolar bakiyesi × kur ile eşleşmelidir.');
   const after = cashAccountCurrentBalance_(id) - (Number(row.values[3]) || 0) + opening;
   if (after < 0) throw new Error('Bu açılış bakiyesi hesabı eksiye düşürür.');
   const sh = getDb_().getSheetByName(APP.sheets.cashAccounts);
+  ensureSheetHeaders_(sh, HEADERS.cashAccounts);
   sh.getRange(row.row, 2, 1, 3).setValues([[name, type, Math.round(opening * 100) / 100]]);
   sh.getRange(row.row, 6).setValue(cleanText_(payload.note, 300));
+  sh.getRange(row.row, 8, 1, 3).setValues([[currency, openingForeign, openingRate]]);
   updateAccountNameReferences_(id, name);
   audit_(session.email, 'DÜZELTİLDİ', 'Kasa/Banka Hesabı', id, name);
   return {ok:true};
@@ -3052,7 +3095,7 @@ function buildAppData_(session, filters) {
     referenceDonationAnalysis: groupDonationReferences_(referenceDonationRows, referencePeriodDonations),
     referenceTargets: referenceTargetData_(session, referencePledgeRows, referenceCollectionRows),
     cash: {
-      accounts: optionalDataRows_(APP.sheets.cashAccounts).filter(function(r) { return r[4] === true; }).map(function(r) { return { id:r[0], name:r[1], type:r[2], active:true }; })
+      accounts: optionalDataRows_(APP.sheets.cashAccounts).filter(function(r) { return r[4] === true; }).map(function(r) { return { id:r[0], name:r[1], type:r[2], active:true, currency:r[7]||'' }; })
     }
   };
   if (approver) {
@@ -3339,7 +3382,7 @@ function expenseRemainingItems_(commitments) {
 }
 
 function pledgeDto_(r) { return { id:r[0], year:r[1], donationType:r[2], fullName:r[3], phone:r[4], payer:r[5], reference:r[6], amount:n_(r[7]), paid:n_(r[8]), remaining:n_(r[9]), status:r[10], pledgeDate:isoDate_(r[11]), personnel:r[14]||'', receivableStatus:String(r[15]||'AKTİF').toUpperCase(), source:String(r[16]||'BAĞIŞ').toUpperCase(), activity:r[17]||'', subActivity:r[18]||'', accountCode:r[19]||'', group:r[20]||'', notes:r[21]||'' }; }
-function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:r[3], donationType:r[4], reference:r[5], payer:r[6], amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'', receiptNo:r[18]||'', group:r[19]||'', activity:r[20]||'', phone:r[21]||'' }; }
+function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:r[3], donationType:r[4], reference:r[5], payer:r[6], amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'', receiptNo:r[18]||'', group:r[19]||'', activity:r[20]||'', phone:r[21]||'', currency:r[22]||'', foreignAmount:n_(r[23]), exchangeRate:n_(r[24]) }; }
 function expenseCommitmentDto_(r, kind) { return { id:r[0], name:r[1], paymentType:r[2], period:r[3], total:n_(r[4]), paid:n_(r[5]), remaining:n_(r[6]), dueDate:isoDate_(r[7]), status:r[8], note:r[9], lessonHours:kind==='teacher'?n_(r[11]):0, hourlyRate:kind==='teacher'?n_(r[12]):0 }; }
 function expensePaymentDto_(r, commitment) { return { id:r[0], date:isoDate_(r[1]), commitmentId:r[2], name:r[3], amount:n_(r[4]), method:r[5], note:r[6], accountId:r[8]||'', accountName:r[9]||'', accrualPeriod:commitment?String(commitment[3]||''):'', paymentType:commitment?String(commitment[2]||''):'' }; }
 function staffPlanDto_(r) { return { id:r[0], name:r[1], paymentType:r[2], amount:n_(r[3]), active:r[4]===true, note:r[5] }; }
@@ -3420,7 +3463,24 @@ function cashAccountDto_(r, collections, staffPayments, teacherPayments, loans, 
   const currentExpense=currentExpensePayments.filter(function(x){return x[6]===r[0];}).reduce(function(s,x){return s+(Number(x[4])||0);},0);
   const receiptExpense=receiptExpenses.filter(function(x){return x[6]===r[0];}).reduce(function(s,x){return s+(Number(x[4])||0);},0);
   const opening=n_(r[3]);
-  return {id:r[0],name:r[1],type:r[2],openingBalance:opening,collected:collected,borrowed:borrowed,staffExpense:staffExpense,teacherExpense:teacherExpense,currentExpense:currentExpense,receiptExpense:receiptExpense,debtRepaid:debtRepaid,totalExpense:staffExpense+teacherExpense+currentExpense+receiptExpense+debtRepaid,balance:opening+collected+borrowed-staffExpense-teacherExpense-currentExpense-receiptExpense-debtRepaid,active:r[4]===true,note:r[5]};
+  const currency=r[7]||((String(r[2]||'').toUpperCase()==='DÖVİZ')?'USD':'');
+  const openingForeign=n_(r[8]);
+  const foreignCollected=collections.filter(function(c){return c[12]===r[0]&&String(c[22]||'')===currency;}).reduce(function(s,c){return s+(Number(c[23])||0);},0);
+  return {id:r[0],name:r[1],type:r[2],openingBalance:opening,collected:collected,borrowed:borrowed,staffExpense:staffExpense,teacherExpense:teacherExpense,currentExpense:currentExpense,receiptExpense:receiptExpense,debtRepaid:debtRepaid,totalExpense:staffExpense+teacherExpense+currentExpense+receiptExpense+debtRepaid,balance:opening+collected+borrowed-staffExpense-teacherExpense-currentExpense-receiptExpense-debtRepaid,active:r[4]===true,note:r[5],currency:currency,openingForeign:openingForeign,openingRate:n_(r[9]),foreignCollected:foreignCollected,foreignBalance:openingForeign+foreignCollected};
+}
+function cashMovements_(accountRows, collections, staffPayments, teacherPayments, loans, loanRepayments, currentExpensePayments, receiptExpenses) {
+  const accountMap={};accountRows.forEach(function(r){accountMap[String(r[0])]=r;});
+  const result=[];
+  function add(accountId,date,id,type,description,income,expense,currency,foreignAmount,exchangeRate){const a=accountMap[String(accountId||'')];if(!a)return;result.push({id:id,date:isoDate_(date),accountId:a[0],accountName:a[1],accountType:a[2],active:a[4]===true,type:type,description:description||'',income:n_(income),expense:n_(expense),currency:currency||'',foreignAmount:n_(foreignAmount),exchangeRate:n_(exchangeRate)});}
+  accountRows.forEach(function(r){if(n_(r[3])||n_(r[8]))add(r[0],r[6],r[0]+'-OPEN','Açılış','Açılış bakiyesi',r[3],0,r[7],r[8],r[9]);});
+  collections.forEach(function(r){add(r[12],r[1],r[0],r[2]?'Tahsilat':'Teberru',(r[3]||'')+' · '+(r[4]||''),r[7],0,r[22],r[23],r[24]);});
+  loans.forEach(function(r){add(r[7],r[1],r[0],'Borç alımı',r[2],r[3],0);});
+  staffPayments.forEach(function(r){add(r[8],r[1],r[0],'Personel ödemesi',(r[3]||'')+' · '+(r[2]||''),0,r[4]);});
+  teacherPayments.forEach(function(r){add(r[8],r[1],r[0],'Öğretmen ödemesi',(r[3]||'')+' · '+(r[2]||''),0,r[4]);});
+  loanRepayments.forEach(function(r){add(r[8],r[1],r[0],'Borç geri ödemesi',r[3],0,r[4]);});
+  currentExpensePayments.forEach(function(r){add(r[6],r[1],r[0],'Cari ödeme',r[3],0,r[4]);});
+  receiptExpenses.forEach(function(r){add(r[6],r[1],r[0],'Fiş gideri',(r[2]||'')+' · '+(r[3]||''),0,r[4]);});
+  return result.sort(function(a,b){return String(b.date).localeCompare(String(a.date))||String(b.id).localeCompare(String(a.id));});
 }
 function cashData_(collections) {
   const staffPayments=optionalDataRows_(APP.sheets.staffPayments);
@@ -3429,18 +3489,21 @@ function cashData_(collections) {
   const loanRepayments=optionalDataRows_(APP.sheets.loanRepayments);
   const currentExpensePayments=optionalDataRows_(APP.sheets.currentExpensePayments);
   const receiptExpenses=optionalDataRows_(APP.sheets.receiptExpenses);
-  const accounts=optionalDataRows_(APP.sheets.cashAccounts).map(function(r){return cashAccountDto_(r,collections,staffPayments,teacherPayments,loans,loanRepayments,currentExpensePayments,receiptExpenses);});
+  const accountRows=optionalDataRows_(APP.sheets.cashAccounts);
+  const accounts=accountRows.map(function(r){return cashAccountDto_(r,collections,staffPayments,teacherPayments,loans,loanRepayments,currentExpensePayments,receiptExpenses);});
+  const activeAccounts=accounts.filter(function(a){return a.active;});
   return {
     accounts:accounts,
-    totalBalance:accounts.filter(function(a){return a.active;}).reduce(function(s,a){return s+a.balance;},0),
-    totalCollected:accounts.reduce(function(s,a){return s+a.collected;},0),
-    totalBorrowed:accounts.reduce(function(s,a){return s+a.borrowed;},0),
-    totalStaffExpense:accounts.reduce(function(s,a){return s+a.staffExpense;},0),
-    totalTeacherExpense:accounts.reduce(function(s,a){return s+a.teacherExpense;},0),
-    totalCurrentExpense:accounts.reduce(function(s,a){return s+a.currentExpense;},0),
-    totalReceiptExpense:accounts.reduce(function(s,a){return s+a.receiptExpense;},0),
-    totalDebtRepaid:accounts.reduce(function(s,a){return s+a.debtRepaid;},0),
-    totalExpense:accounts.reduce(function(s,a){return s+a.totalExpense;},0)
+    movements:cashMovements_(accountRows,collections,staffPayments,teacherPayments,loans,loanRepayments,currentExpensePayments,receiptExpenses),
+    totalBalance:activeAccounts.reduce(function(s,a){return s+a.balance;},0),
+    totalCollected:activeAccounts.reduce(function(s,a){return s+a.collected;},0),
+    totalBorrowed:activeAccounts.reduce(function(s,a){return s+a.borrowed;},0),
+    totalStaffExpense:activeAccounts.reduce(function(s,a){return s+a.staffExpense;},0),
+    totalTeacherExpense:activeAccounts.reduce(function(s,a){return s+a.teacherExpense;},0),
+    totalCurrentExpense:activeAccounts.reduce(function(s,a){return s+a.currentExpense;},0),
+    totalReceiptExpense:activeAccounts.reduce(function(s,a){return s+a.receiptExpense;},0),
+    totalDebtRepaid:activeAccounts.reduce(function(s,a){return s+a.debtRepaid;},0),
+    totalExpense:activeAccounts.reduce(function(s,a){return s+a.totalExpense;},0)
   };
 }
 function cashAccountCurrentBalance_(accountId) {
@@ -3627,13 +3690,13 @@ function createSheet_(ss, name, headers, existing) {
 function seedCashAccounts_(ss) {
   const sh = ss.getSheetByName(APP.sheets.cashAccounts);
   if (!sh || sh.getLastRow() > 1) return;
-  sh.getRange(2, 1, 5, HEADERS.cashAccounts.length).setValues([
+  sh.getRange(2, 1, 5, HEADERS.cashAccounts.length).setValues(fitRowsWidth_([
     ['HSP-NAKIT','Nakit Kasa','KASA',0,true,'',new Date()],
     ['HSP-BANKA','Banka Hesabı','BANKA',0,true,'',new Date()],
     ['HSP-POS','POS / Kredi Kartı','POS',0,true,'',new Date()],
     ['HSP-DIGER','Diğer Tahsilatlar','DİĞER',0,true,'',new Date()],
     ['HSP-DEVIR','Devir / Belirsiz','DEVİR',0,true,'Eski veya aktarılan kayıtlar',new Date()]
-  ]);
+  ], HEADERS.cashAccounts.length));
 }
 function migrateCollectionAccounts_(ss) {
   const sh = ss.getSheetByName(APP.sheets.collections);
@@ -3804,6 +3867,7 @@ function parseFlexibleDate_(value,label) {
 }
 function inRange_(v,start,end){ const d=v instanceof Date?v:new Date(v); return !isNaN(d.getTime())&&d>=start&&d<=end; }
 function isoDate_(v){ if(!v)return ''; const d=v instanceof Date?v:new Date(v); if(isNaN(d.getTime()))return ''; return Utilities.formatDate(d,'Europe/Istanbul','yyyy-MM-dd'); }
+
 function n_(v){ return Number(v)||0; }
 function sum_(rows,index){ return rows.reduce((s,r)=>s+(Number(r[index])||0),0); }
 function makeId_(prefix){ return prefix+'-'+Utilities.formatDate(new Date(),'Europe/Istanbul','yyyyMMddHHmmss')+'-'+Math.floor(1000+Math.random()*9000); }

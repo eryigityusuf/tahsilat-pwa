@@ -4,8 +4,8 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, '..');
-const source = await readFile(resolve(root, 'kodlar', 'Code.gs'), 'utf8');
-const client = await readFile(resolve(root, 'kodlar', 'Scripts.html'), 'utf8');
+const source = await readFile(resolve(root, 'Code.gs'), 'utf8');
+const client = await readFile(resolve(root, 'Scripts.html'), 'utf8');
 const discovered = new Set(['getAppData', 'login', 'logout']);
 for (const match of client.matchAll(/(?:server|submit)\('([A-Za-z0-9_]+)/g)) discovered.add(match[1]);
 for (const name of ['reconcileSystem', 'generateFullDataBackup', 'restorePledgeBackup']) discovered.add(name);
