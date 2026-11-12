@@ -113,6 +113,10 @@ export function makeRuntime(snapshot) {
             getDisplayValue() { const value=this.getValue(); return value instanceof Date ? formatDate(value,'Europe/Istanbul','dd.MM.yyyy HH:mm:ss') : String(value ?? ''); },
             setValue(value) { return this.setValues([[value]]); },
             setNumberFormat() { return this; },
+            setFontWeight() { return this; },
+            setFontColor() { return this; },
+            setBackground() { return this; },
+            setVerticalAlignment() { return this; },
             clearContent() {
               const values = Array.from({ length:h }, () => Array.from({ length:w }, () => ''));
               return this.setValues(values);
