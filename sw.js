@@ -1,11 +1,10 @@
-const CACHE='namaz-yoklama-shell-v2';
+const CACHE='tahsilat-shell-v40';
 const SHELL=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install', event => {
   event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)));
   self.skipWaiting();
 });
-
 self.addEventListener('activate', event => {
   event.waitUntil(
     caches.keys().then(keys =>
@@ -31,3 +30,4 @@ self.addEventListener('fetch', event => {
     );
   }
 });
+

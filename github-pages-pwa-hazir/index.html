@@ -12,7 +12,7 @@
   <meta name="description" content="Tahsilat, taahhüt, öğrenci, personel ve öğretmen ödemeleri yönetimi">
   <link rel="manifest" href="./manifest.webmanifest">
   <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">
-  <link rel="stylesheet" href="./styles.css?v=64">
+  <link rel="stylesheet" href="./styles.css?v=65">
 </head>
 <body>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
@@ -49,7 +49,7 @@
     </div>
   </div>
 
-  <dialog id="modal"><form method="dialog" class="modal-card"><div class="modal-head"><h3 id="modalTitle"></h3><button class="icon-btn" value="cancel" aria-label="Kapat">×</button></div><div id="modalBody"></div></form></dialog>
+  <dialog id="modal"><div class="modal-card"><div class="modal-head"><div><span class="modal-eyebrow">TAHSİLAT YÖNETİMİ</span><h3 id="modalTitle"></h3></div><button class="icon-btn modal-close" type="button" aria-label="Kapat" onclick="document.getElementById('modal').close()">×</button></div><div id="modalBody"></div></div></dialog>
   <div id="sessionWarning" class="session-warning hidden" role="alertdialog" aria-modal="true" aria-labelledby="sessionWarningTitle">
     <div class="session-warning-card">
       <div class="session-warning-icon" aria-hidden="true">⌛</div>
@@ -58,6 +58,6 @@
       <button class="btn primary" type="button" onclick="continueSession()">Oturuma devam et</button>
     </div>
   </div>
-  <script src="./app.js?v=64" defer></script>
+  <script src="./app.js?v=65" defer></script>
 </body>
 </html>
