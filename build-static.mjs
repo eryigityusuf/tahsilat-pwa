@@ -15,7 +15,7 @@ const index = indexTemplate
     '  <meta name="description" content="Tahsilat, taahhüt, öğrenci, personel ve öğretmen ödemeleri yönetimi">',
     '  <link rel="manifest" href="./manifest.webmanifest">',
     '  <link rel="apple-touch-icon" href="./icons/apple-touch-icon.png">',
-    '  <link rel="stylesheet" href="./styles.css?v=61">',
+    '  <link rel="stylesheet" href="./styles.css?v=62">',
   ].join('\n'))
   .replace("  <?!= include('Scripts'); ?>", [
     '  <div id="sessionWarning" class="session-warning hidden" role="alertdialog" aria-modal="true" aria-labelledby="sessionWarningTitle">',
@@ -26,7 +26,7 @@ const index = indexTemplate
     '      <button class="btn primary" type="button" onclick="continueSession()">Oturuma devam et</button>',
     '    </div>',
     '  </div>',
-    '  <script src="./app.js?v=61" defer></script>',
+    '  <script src="./app.js?v=62" defer></script>',
   ].join('\n'));
 
 const styles = stylesTemplate
