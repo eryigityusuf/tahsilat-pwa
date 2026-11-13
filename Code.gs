@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 21,
+  cacheSchemaVersion: 22,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -3122,6 +3122,7 @@ function buildAppData_(session, filters) {
     collections: (applyToLists?allCollectionRows.filter(function(r){return inRange_(r[1],start,end);}):allCollectionRows).slice().reverse().map(collectionDto_),
     donationAnalysis: groupSubActivities_(pledgeRows, collectionRows, periodCollections),
     activityAnalysis: groupActivities_(pledgeRows, collectionRows, periodCollections),
+    referenceTypeAnalysis: groupReferenceTypes_(pledgeRows, periodCollections),
     referenceAnalysis: groupReferences_(referencePledgeRows, referencePledgeCollectionRows, referencePeriodPledgeCollections, referencePeriodPledges),
     referenceDonationAnalysis: groupDonationReferences_(referenceDonationRows, referencePeriodDonations),
     referenceTargets: referenceTargetData_(session, referencePledgeRows, referenceCollectionRows),
@@ -3343,6 +3344,24 @@ function groupActivities_(pledges, collections, periodCollections) {
   return Object.keys(map).map(function(k) {
     return Object.assign(map[k], { remaining:map[k].pledged - map[k].collected });
   });
+}
+
+function groupReferenceTypes_(pledges, periodCollections) {
+  const pledgeMap = {};
+  const map = {};
+  (pledges || []).forEach(function(row) { pledgeMap[String(row[0] || '')] = row; });
+  (periodCollections || []).forEach(function(row) {
+    const pledge = pledgeMap[String(row[2] || '')];
+    if (!pledge) return;
+    const name = cleanText_(pledge[2], 80) || 'Belirtilmemiş';
+    const key = normalizeKey_(name) || 'belirtilmemis';
+    const item = map[key] || (map[key] = { name:name, period:0 });
+    item.period += Number(row[7] || 0);
+  });
+  const total = Object.keys(map).reduce(function(sum, key) { return sum + map[key].period; }, 0);
+  return Object.keys(map).map(function(key) {
+    return { name:map[key].name, period:map[key].period, rate:total ? map[key].period / total : 0 };
+  }).sort(function(a, b) { return b.period - a.period; });
 }
 
 function groupReferences_(pledges, collections, periodCollections, periodPledges) {

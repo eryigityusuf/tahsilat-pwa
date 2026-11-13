@@ -181,3 +181,6 @@ dialog.statement-dialog .modal-card{width:min(1120px,calc(100vw - 30px))}.cash-s
 .user-reference-single span{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
 .user-reference-single strong{color:#12364c}
 @media(max-width:640px){.user-reference-options{grid-template-columns:1fr}}
+.dashboard-period-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(135deg,#fff,#f4f8fa);box-shadow:0 2px 8px rgba(22,58,95,.04)}
+.dashboard-period-bar>div:first-child{display:grid;gap:3px}.dashboard-period-bar strong{color:var(--navy);font-size:.9rem}.dashboard-period-bar span{color:var(--muted);font-size:.75rem}
+@media(max-width:640px){.dashboard-period-bar{align-items:stretch;flex-direction:column}.dashboard-period-bar .statement-periods{grid-template-columns:repeat(3,1fr)}}
