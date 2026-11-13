@@ -185,4 +185,75 @@ dialog.statement-dialog .modal-card{width:min(1120px,calc(100vw - 30px))}.cash-s
 .dashboard-period-bar{display:flex;align-items:center;justify-content:space-between;gap:16px;padding:14px 16px;border:1px solid var(--line);border-radius:14px;background:linear-gradient(135deg,#fff,#f4f8fa);box-shadow:0 2px 8px rgba(22,58,95,.04)}
 .dashboard-period-bar>div:first-child{display:grid;gap:3px}.dashboard-period-bar strong{color:var(--navy);font-size:.9rem}.dashboard-period-bar span{color:var(--muted);font-size:.75rem}
 @media(max-width:640px){.dashboard-period-bar{align-items:stretch;flex-direction:column}.dashboard-period-bar .statement-periods{grid-template-columns:repeat(3,1fr)}}
+
+/* Ortak tablo hizalama ve mobil görünüm */
+.data-table th.align-text,.data-table td.align-text{text-align:left}
+.data-table th.align-number,.data-table td.align-number{text-align:right;font-variant-numeric:tabular-nums}
+.data-table th.align-center,.data-table td.align-center{text-align:center}
+.data-table th,.data-table td{vertical-align:middle}
+.table-wrap-compact .data-table{min-width:0;table-layout:fixed}
+.data-table-compact th:first-child,.data-table-compact td:first-child{width:44%}
+.data-table-compact th:nth-child(2),.data-table-compact td:nth-child(2){width:34%}
+.data-table-compact th:nth-child(3),.data-table-compact td:nth-child(3){width:22%}
+body.session-restoring{cursor:progress}
+body.session-restoring:after{content:'Oturum açılıyor…';position:fixed;z-index:10000;inset:0;display:grid;place-items:center;background:radial-gradient(circle at 50% 42%,#fff 0,#f3f7f8 70%);color:var(--navy);font-family:Georgia,"Times New Roman",serif;font-size:1.05rem;font-weight:700;letter-spacing:.02em}
+
+@media(max-width:760px){
+  html,body{max-width:100%;overflow-x:hidden}
+  .app,.workspace,.content,.panel,.cards,.grid-2{width:100%;max-width:100%;min-width:0}
+  .sidebar{left:-310px;width:min(86vw,292px);padding:15px 12px;transition:left .22s ease}
+  .sidebar.open{left:0}
+  .sidebar .brand{padding-bottom:16px}
+  .nav-btn{min-height:44px;padding:10px 11px}
+  .topbar{display:grid;grid-template-columns:auto minmax(0,1fr) auto;align-items:center;gap:9px;padding:11px 12px}
+  .topbar>div:first-of-type{min-width:0}
+  .topbar h2{overflow:hidden;text-overflow:ellipsis;font-size:1.08rem;white-space:nowrap}
+  .topbar p{overflow:hidden;text-overflow:ellipsis;font-size:.72rem;white-space:nowrap}
+  .topbar .sync-status{justify-self:end;margin-left:0;padding:7px 9px}
+  .topbar .sync-status strong{font-size:.68rem}
+  .topbar .background-status{grid-column:1/-1;justify-content:center}
+  .topbar .date-filter{grid-column:1/-1;margin:0;padding:9px;border-radius:11px}
+  .date-filter label{min-width:0}
+  .date-filter input{width:100%;min-height:42px}
+  .date-filter .inline-check{min-height:42px;padding:8px 10px;border:1px solid var(--line);border-radius:9px;background:#fff}
+  .date-filter>.btn{min-height:42px;width:100%}
+  .content{gap:14px;padding:13px 10px 24px}
+  .cards{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px}
+  .card{padding:14px 12px}
+  .card span{font-size:.72rem}
+  .card strong{overflow-wrap:anywhere;font-size:1.08rem;line-height:1.2}
+  .panel{padding:13px 10px;border-radius:13px}
+  .panel-head{gap:9px;margin-bottom:11px}
+  .panel-head h3{font-size:.96rem}
+  .panel-head p{font-size:.74rem;line-height:1.4}
+  .panel-head>.actions{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px}
+  .btn,.tab{min-height:42px;padding:9px 11px;font-size:.78rem}
+  .actions{gap:7px}
+  .tabs{gap:6px;margin-inline:-2px;padding:2px;scrollbar-width:thin}
+  .table-wrap{max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain;-webkit-overflow-scrolling:touch}
+  .data-table{min-width:680px}
+  .data-table th{padding:10px 9px;font-size:.63rem;letter-spacing:.035em}
+  .data-table td{padding:9px;font-size:.75rem}
+  .table-wrap-compact{overflow-x:hidden}
+  .table-wrap-compact .data-table{min-width:0;width:100%}
+  .data-table-compact th,.data-table-compact td{padding:10px 8px;white-space:normal}
+  .data-table-compact th{font-size:.61rem}
+  .data-table-compact td{font-size:.76rem}
+  .dashboard-period-bar{padding:12px}
+  .dashboard-period-bar .statement-periods{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+  .dashboard-period-bar .statement-period-btn{min-width:0;padding:8px 5px;font-size:.67rem}
+  .bar-row{grid-template-columns:minmax(0,1fr) auto;gap:7px 10px}
+  .bar-row .bar-track{grid-column:1/-1;grid-row:2}
+  .bar-row .bar-value{text-align:right!important;font-size:.72rem}
+  .form-actions{position:sticky;bottom:0;z-index:2;background:#fff}
+  .toast{right:10px;bottom:10px;left:10px;text-align:center}
+}
+
+@media(max-width:390px){
+  .cards{grid-template-columns:1fr 1fr}
+  .card strong{font-size:.98rem}
+  .topbar .sync-status strong{display:none}
+  .panel-head>.actions{grid-template-columns:1fr}
+  .data-table-compact th,.data-table-compact td{padding-inline:6px}
+}
 </style>
