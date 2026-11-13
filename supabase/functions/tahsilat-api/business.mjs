@@ -383,6 +383,15 @@ function getAppData(token, filters, forceRefresh) {
 }
 
 /**
+ * İstemcilerin başka oturumlardaki değişiklikleri büyük veri paketini
+ * indirmeden algılayabilmesi için yalnızca güncel veri sürümünü döndürür.
+ */
+function getDataRevision(token) {
+  requireSession_(token);
+  return { revision:getDataRevision_(), checkedAt:new Date().toISOString() };
+}
+
+/**
  * Büyük uygulama verisini google.script.run yanıt sınırına takılmadan taşır.
  * İstemci önce bu küçük manifesti, ardından numaralı parçaları indirir.
  */
@@ -3956,7 +3965,7 @@ function makeId_(prefix){ return prefix+'-'+Utilities.formatDate(new Date(),'Eur
     return originalRestorePledgeBackup(token, payload);
   };
 
-  const api = { approveCollection, bulkImportAccounting, bulkImportDonations, bulkSavePledges, bulkUpdateCollections, convertPledgesToStudentAccruals, copyReferenceTargetsMonth, copyStaffCommitmentsMonth, copyTeacherAccrualsMonth, deleteAllDonations, deleteAllPledges, deleteCollection, deleteCurrentExpense, deleteCurrentExpensePayment, deleteExpensePayment, deleteLoan, deleteLoanRepayment, deletePledge, deleteReceiptExpense, deleteReferenceTarget, deleteStaffAccrual, deleteTeacherAccrual, generateFullDataBackup, generateMonthlyStaffCommitments, generateMonthlyTeacherAccruals, generatePersonnelPledgePdf, generateReferenceTargetsPdf, generateTeacherPaymentReceiptPdf, getAppData, login, logout, reconcileSystem, rejectCollection, reopenCollectionApproval, restorePledgeBackup, saveBulkCollections, saveBulkExpensePayments, saveBulkReferenceTargets, saveCashAccount, saveCollection, saveCollectionColumnPreferences, saveCurrentExpense, saveCurrentExpensePayment, saveExpenseCommitment, saveExpensePayment, saveLoan, saveLoanRepayment, savePledge, savePledgeColumnPreferences, saveQuickDonation, saveReceiptExpense, saveReferenceTarget, saveStaffPlanSet, saveStudentAccrual, saveTeacherPlan, saveUser, setCashAccountActive, setPledgeReceivableStatus, setReferenceTargetActive, setStaffPlanActive, setTeacherPlanActive, setUserActive, touchSession, updateCashAccount, updateCollection, updateCurrentExpense, updateCurrentExpensePayment, updateExpensePayment, updateLoan, updateLoanRepayment, updatePledge, updateReceiptExpense, updateReferenceTarget, updateStaffAccrual, updateStaffPlan, updateStudentAccrual, updateTeacherAccrual, updateTeacherPlan, updateUser };
+  const api = { approveCollection, bulkImportAccounting, bulkImportDonations, bulkSavePledges, bulkUpdateCollections, convertPledgesToStudentAccruals, copyReferenceTargetsMonth, copyStaffCommitmentsMonth, copyTeacherAccrualsMonth, deleteAllDonations, deleteAllPledges, deleteCollection, deleteCurrentExpense, deleteCurrentExpensePayment, deleteExpensePayment, deleteLoan, deleteLoanRepayment, deletePledge, deleteReceiptExpense, deleteReferenceTarget, deleteStaffAccrual, deleteTeacherAccrual, generateFullDataBackup, generateMonthlyStaffCommitments, generateMonthlyTeacherAccruals, generatePersonnelPledgePdf, generateReferenceTargetsPdf, generateTeacherPaymentReceiptPdf, getAppData, getDataRevision, login, logout, reconcileSystem, rejectCollection, reopenCollectionApproval, restorePledgeBackup, saveBulkCollections, saveBulkExpensePayments, saveBulkReferenceTargets, saveCashAccount, saveCollection, saveCollectionColumnPreferences, saveCurrentExpense, saveCurrentExpensePayment, saveExpenseCommitment, saveExpensePayment, saveLoan, saveLoanRepayment, savePledge, savePledgeColumnPreferences, saveQuickDonation, saveReceiptExpense, saveReferenceTarget, saveStaffPlanSet, saveStudentAccrual, saveTeacherPlan, saveUser, setCashAccountActive, setPledgeReceivableStatus, setReferenceTargetActive, setStaffPlanActive, setTeacherPlanActive, setUserActive, touchSession, updateCashAccount, updateCollection, updateCurrentExpense, updateCurrentExpensePayment, updateExpensePayment, updateLoan, updateLoanRepayment, updatePledge, updateReceiptExpense, updateReferenceTarget, updateStaffAccrual, updateStaffPlan, updateStudentAccrual, updateTeacherAccrual, updateTeacherPlan, updateUser };
   const googleMethods = new Set(["generatePersonnelPledgePdf","generateReferenceTargetsPdf","generateTeacherPaymentReceiptPdf"]);
   return {
     googleMethods,

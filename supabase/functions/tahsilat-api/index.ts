@@ -114,7 +114,9 @@ Deno.serve(async req => {
     const owner = method === 'login' ? String(args[0] || '').trim().toLowerCase() : digest(String(args[0] || ''));
 
     for (let attempt=0; attempt<4; attempt++) {
-      const snapshot = await rpc('tahsilat_load', { p_keys:cacheKeys(method,args), p_sheets:null });
+      // Sürüm kontrolü sekiz saniyede bir çalışır. Bu hafif çağrıda tüm veri
+      // satırlarını taşımak yerine yalnızca meta/properties ve oturumu yükle.
+      const snapshot = await rpc('tahsilat_load', { p_keys:cacheKeys(method,args), p_sheets:method === 'getDataRevision' ? [] : null });
       if (!snapshot?.initialized) return reply({ ok:false, error:{ code:'SETUP', message:'Supabase veri aktarımı henüz tamamlanmadı.' } }, 503);
       const runtime = makeRuntime(snapshot);
       const business = createBusiness(runtime);

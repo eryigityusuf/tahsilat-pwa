@@ -379,6 +379,15 @@ function getAppData(token, filters, forceRefresh) {
 }
 
 /**
+ * İstemcilerin başka oturumlardaki değişiklikleri büyük veri paketini
+ * indirmeden algılayabilmesi için yalnızca güncel veri sürümünü döndürür.
+ */
+function getDataRevision(token) {
+  requireSession_(token);
+  return { revision:getDataRevision_(), checkedAt:new Date().toISOString() };
+}
+
+/**
  * Büyük uygulama verisini google.script.run yanıt sınırına takılmadan taşır.
  * İstemci önce bu küçük manifesti, ardından numaralı parçaları indirir.
  */
