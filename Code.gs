@@ -2007,7 +2007,7 @@ function updateCashAccount(token, payload) {
   sh.getRange(row.row, 8, 1, 3).setValues([[currency, openingForeign, openingRate]]);
   updateAccountNameReferences_(id, name);
   audit_(session.email, 'DÜZELTİLDİ', 'Kasa/Banka Hesabı', id, name);
-  return {ok:true};
+  return {ok:true, id:id, name:name, type:type, openingBalance:Math.round(opening * 100) / 100, balance:Math.round(after * 100) / 100, note:cleanText_(payload.note, 300), currency:currency, openingForeign:openingForeign || 0, openingRate:openingRate || 0};
 }
 
 function setCashAccountActive(token, accountId, active) {
