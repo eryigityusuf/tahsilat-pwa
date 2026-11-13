@@ -1481,24 +1481,20 @@ function saveQuickDonation(token, payload) {
   const amount = positiveNumber_(payload.amount, 'Bağış tutarı');
   const date = parseDate_(payload.date, 'Bağış tarihi');
   const donationType = cleanText_(payload.donationType, 80);
-  const activity = cleanText_(payload.activity, 120);
   const fullName = cleanText_(payload.fullName, 120);
   const reference = isApproverSession_(session) ? cleanText_(payload.reference, 100) : referenceForSession_(session, payload.reference);
   const account = findRowBy_(APP.sheets.cashAccounts, 1, cleanText_(payload.accountId, 60));
-  if (!donationType || !activity || !fullName || !reference) throw new Error('Referans nevi, faaliyet, bağışçı ve referans zorunludur.');
+  if (!donationType || !fullName || !reference) throw new Error('Bağış türü, bağışçı ve referans zorunludur.');
   if (!account || account.values[4] !== true) throw new Error('Aktif bir kasa veya banka hesabı seçin.');
   const fx = collectionFxMeta_(payload, account, amount);
   const id = makeId_('HBG');
   withLock_(function() {
     const collectionSheet = getDb_().getSheetByName(APP.sheets.collections);
     ensureSheetHeaders_(collectionSheet, HEADERS.collections);
-    const donationRow = [
+    appendRows_(collectionSheet, [collectionRowWithFx_([
       id, date, '', fullName, donationType, reference, cleanText_(payload.payer, 120), amount,
       cleanText_(payload.method, 50), cleanText_(payload.note, 300), session.email, new Date(), account.values[0], account.values[1]
-    ].concat(collectionApprovalMeta_(session));
-    while (donationRow.length < 22) donationRow.push('');
-    donationRow[20] = activity;
-    appendRows_(collectionSheet, [collectionRowWithFx_(donationRow, fx)], HEADERS.collections.length);
+    ].concat(collectionApprovalMeta_(session)), fx)], HEADERS.collections.length);
     audit_(session.email, isApproverSession_(session) ? 'HIZLI_BAĞIŞ_ONAYLANDI' : 'HIZLI_BAĞIŞ_ONAYA_GÖNDERİLDİ', 'Doğrudan Gelir', id, fullName + ' / ' + amount + ' TL / ' + account.values[1]);
   });
   return {ok:true, approvalStatus:isApproverSession_(session)?'ONAYLANDI':'BEKLİYOR'};
@@ -1526,15 +1522,12 @@ function updateCollection(token, payload) {
       if (amount > allowed) throw new Error('Tahsilat kalan bakiyeden büyük olamaz.');
     }
     let directMeta = null;
-    let directActivity = '';
     if (!pledge) {
       const donationType = cleanText_(payload.donationType, 80);
-      const activity = cleanText_(payload.activity, 120);
       const fullName = cleanText_(payload.fullName, 120);
       const reference = cleanText_(payload.reference, 100);
-      if (!donationType || !activity || !fullName || !reference) throw new Error('Referans nevi, faaliyet, bağışçı ve referans zorunludur.');
+      if (!donationType || !fullName || !reference) throw new Error('Bağış türü, bağışçı ve referans zorunludur.');
       directMeta = [fullName, donationType, reference, cleanText_(payload.payer, 120)];
-      directActivity = activity;
     }
     if (wasApproved) {
       const deltas = {};
@@ -1545,10 +1538,7 @@ function updateCollection(token, payload) {
     }
     const sh = getDb_().getSheetByName(APP.sheets.collections);
     sh.getRange(current.row, 2).setValue(date);
-    if (directMeta) {
-      sh.getRange(current.row, 4, 1, 4).setValues([directMeta]);
-      sh.getRange(current.row, 21).setValue(directActivity);
-    }
+    if (directMeta) sh.getRange(current.row, 4, 1, 4).setValues([directMeta]);
     sh.getRange(current.row, 8, 1, 3).setValues([[amount, cleanText_(payload.method, 50), cleanText_(payload.note, 300)]]);
     sh.getRange(current.row, 13, 1, 2).setValues([[account.values[0], account.values[1]]]);
     ensureSheetHeaders_(sh, HEADERS.collections);
@@ -3294,12 +3284,24 @@ function groupSubActivities_(pledges, collections, periodCollections) {
   function collectionName_(row) {
     const pledge = pledgeMap[String(row && row[2] || '')];
     if (pledge) return nameForPledge_(pledge);
-    // Doğrudan teberruda faaliyet ve alt faaliyet aynı sınıflandırmadır.
+    // Doğrudan teberruda Nevi alt faaliyettir. Her gelir mutlaka bir gruba
+    // yazılır; aksi halde faaliyet ve alt faaliyet icmalleri farklı çıkar.
+    let type = cleanText_(row && row[4],120);
+    const typeHeader = normalizeHeader_(type);
     const activity = cleanText_(row && row[20],120);
-    if (activity) return activity;
-    const legacyType = cleanText_(row && row[4],120);
-    const legacyKey = normalizeHeader_(legacyType);
-    return legacyType ? (paymentChannelKeys[legacyKey] ? 'Belirtilmemiş' : legacyType) : 'Belirtilmemiş';
+    if (!type || paymentChannelKeys[typeHeader]) type = activity || 'Belirtilmemiş';
+    let key = normalizeKey_(type);
+    const aliases = {
+      'KURBAN':'BAGIS KURBAN',
+      'BAGISLIK KURBAN':'BAGIS KURBAN',
+      'EGITIM':'EGITIM UCRETI'
+    };
+    const aliasKey = aliases[normalizeHeader_(type)];
+    if (aliasKey) {
+      const existingKey = Object.keys(map).filter(function(k) { return normalizeHeader_(map[k].name) === aliasKey; })[0];
+      if (existingKey) key = existingKey;
+    }
+    return map[key] ? map[key].name : type;
   }
   (pledges || []).forEach(function(r) {
     pledgeMap[String(r[0])] = r;

@@ -52,9 +52,7 @@ const byName = (items, name) => items.find(item => context.normalizeHeader_(item
 assert.equal(sum(activities), 30278, 'Faaliyet toplamı tüm dönem gelirlerini içermeli.');
 assert.equal(sum(subActivities), 30278, 'Alt faaliyet toplamı faaliyet toplamına eşit olmalı.');
 assert.equal(byName(activities, 'DİĞER').period, 1808, 'Diğer geliri faaliyet toplamından çıkarılmamalı.');
-assert.equal(byName(activities, 'KURBAN').period, 19000, 'Kurban faaliyet toplamı bağlı tahsilat ve doğrudan teberruları içermeli.');
-assert.equal(byName(subActivities, 'KURBAN').period, 17000, 'Doğrudan teberruda alt faaliyet, faaliyet adıyla aynı olmalı.');
-assert.equal(byName(subActivities, 'BAĞIŞ KURBAN').period, 2000, 'Taahhüde bağlı tahsilat kendi alt faaliyetini korumalı.');
+assert.equal(byName(subActivities, 'BAĞIŞ KURBAN').period, 19000, 'Kurban teberruları Bağış Kurban altında birleşmeli.');
 assert.equal(byName(subActivities, 'GIDA').period, 9270);
 assert.equal(byName(subActivities, 'SAHUR').period, 200);
 
