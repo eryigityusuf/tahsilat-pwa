@@ -2,7 +2,7 @@ const state={token:'',data:null,view:'dashboard',pages:{},pageSizes:{collections
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='68';
+const PWA_BUILD='69';
 const SUPABASE_API='https://yrhirwtwokzmixfbjlde.supabase.co/functions/v1/tahsilat-api';
 const IDLE_SESSION_MS=30*60*1000;
 const IDLE_WARNING_MS=2*60*1000;
@@ -437,14 +437,14 @@ function cashStatementModal(accountId=''){
   const accounts=(state.data.cash?.accounts||[]).map(x=>({value:x.id,label:x.name+(x.active?'':' · Pasif')}));
   const options=[{value:'',label:'Tüm hesaplar'},...accounts];
   const accountSelect=selectValueField('Hesap','cashStatementAccount',options).replace('id="cashStatementAccount"','id="cashStatementAccount" onchange="renderCashStatement()"');
-  const controls=`<div id="cashStatementHero"></div><section class="statement-filter-card"><div class="statement-controls">${accountSelect}${inputField('Başlangıç','cashStatementStart','date',false,'onchange="renderCashStatement()"')}${inputField('Bitiş','cashStatementEnd','date',false,'onchange="renderCashStatement()"')}<button class="btn primary statement-show-btn" type="button" onclick="renderCashStatement()">Ekstreyi göster</button></div><div class="statement-filter-footer"><div class="statement-periods" role="group" aria-label="Hızlı tarih aralığı"><button class="statement-period-btn active" type="button" onclick="setCashStatementPeriod('all',this)">Tüm zamanlar</button><button class="statement-period-btn" type="button" onclick="setCashStatementPeriod('month',this)">Bu ay</button><button class="statement-period-btn" type="button" onclick="setCashStatementPeriod('30days',this)">Son 30 gün</button><button class="statement-period-btn" type="button" onclick="setCashStatementPeriod('year',this)">Bu yıl</button></div><button class="btn tiny secondary" type="button" onclick="printCashStatement()">Yazdır / PDF</button></div></section><div id="cashStatementResults" class="statement-results"></div>`;
+  const controls=`<div id="cashStatementHero"></div><section class="statement-filter-card"><div class="statement-controls">${accountSelect}${inputField('Başlangıç','cashStatementStart','date',false,'onchange="renderCashStatement()"')}${inputField('Bitiş','cashStatementEnd','date',false,'onchange="renderCashStatement()"')}<button class="btn primary statement-show-btn" type="button" onclick="renderCashStatement()">Ekstreyi göster</button></div><div class="statement-filter-footer"><div class="statement-periods" role="group" aria-label="Hızlı tarih aralığı"><button class="statement-period-btn active" type="button" onclick="setCashStatementPeriod('all',this)">Tüm zamanlar</button><button class="statement-period-btn" type="button" onclick="setCashStatementPeriod('today',this)">Bugün</button><button class="statement-period-btn" type="button" onclick="setCashStatementPeriod('week',this)">Bu hafta</button><button class="statement-period-btn" type="button" onclick="setCashStatementPeriod('month',this)">Bu ay</button><button class="statement-period-btn" type="button" onclick="setCashStatementPeriod('30days',this)">Son 30 gün</button><button class="statement-period-btn" type="button" onclick="setCashStatementPeriod('year',this)">Bu yıl</button></div><button class="btn tiny secondary" type="button" onclick="printCashStatement()">Yazdır / PDF</button></div></section><div id="cashStatementResults" class="statement-results"></div>`;
   const selected=(state.data.cash?.accounts||[]).find(x=>x.id===accountId);
   showModal(selected?`${selected.name} · Hesap ekstresi`:'Tüm kasa / banka ekstresi',`<div class="statement-modal cash-statement-modal">${controls}</div>`);$('#modal').classList.add('wide-modal','statement-dialog');$('#cashStatementAccount').value=accountId;renderCashStatement();
 }
 function statementIsoDate(d){return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`}
 function setCashStatementPeriod(period,button){
   const now=new Date();let start='';let end='';
-  if(period!=='all'){end=statementIsoDate(now);const d=new Date(now);if(period==='month')d.setDate(1);else if(period==='year'){d.setMonth(0);d.setDate(1)}else if(period==='30days')d.setDate(d.getDate()-29);start=statementIsoDate(d)}
+  if(period!=='all'){end=statementIsoDate(now);const d=new Date(now);if(period==='today'){}else if(period==='week')d.setDate(d.getDate()-((d.getDay()+6)%7));else if(period==='month')d.setDate(1);else if(period==='year'){d.setMonth(0);d.setDate(1)}else if(period==='30days')d.setDate(d.getDate()-29);start=statementIsoDate(d)}
   if($('#cashStatementStart'))$('#cashStatementStart').value=start;if($('#cashStatementEnd'))$('#cashStatementEnd').value=end;
   document.querySelectorAll('.statement-period-btn').forEach(x=>x.classList.toggle('active',x===button));renderCashStatement();
 }
