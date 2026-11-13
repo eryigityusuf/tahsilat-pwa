@@ -7,7 +7,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 20,
+  cacheSchemaVersion: 21,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -354,9 +354,11 @@ function login(email, pin) {
   }
   cache.remove(attemptKey);
   const token = Utilities.getUuid() + Utilities.getUuid();
+  const references = userReferences_(row.values[4]);
+  const accessRevision = cache.get('user-access-revision:' + row.values[0]) || '';
   const session = {
     userId: row.values[0], name: row.values[1], email: row.values[2],
-    role: row.values[3], reference: row.values[4], validatedAt: Date.now()
+    role: row.values[3], reference: references[0] || '', references: references, accessRevision: accessRevision, validatedAt: Date.now()
   };
   CacheService.getScriptCache().put('session:' + token, JSON.stringify(session), APP.sessionSeconds);
   audit_(email, 'GİRİŞ', 'Oturum', session.userId, 'Başarılı giriş.');
@@ -441,7 +443,7 @@ function getCachedAppData_(session, filters, forceRefresh) {
     end: String(filters.end || ''),
     applyToLists: filters.applyToLists === true || String(filters.applyToLists) === 'true'
   };
-  const signature = [APP.cacheSchemaVersion, revision, session.userId, session.role, session.reference || '', normalizedFilters.start, normalizedFilters.end, normalizedFilters.applyToLists ? '1' : '0'].join('|');
+  const signature = [APP.cacheSchemaVersion, revision, session.userId, session.role, (session.references || [session.reference || '']).join('~'), normalizedFilters.start, normalizedFilters.end, normalizedFilters.applyToLists ? '1' : '0'].join('|');
   const cacheKey = 'appdata:' + sha256Hex_(signature).slice(0, 40);
   if (!forceRefresh) {
     const cached = readChunkedCache_(cacheKey);
@@ -810,7 +812,7 @@ function savePledge(token, payload) {
   const year = Math.trunc(Number(payload.year));
   const donationType = cleanText_(payload.donationType, 80);
   const fullName = cleanText_(payload.fullName, 120);
-  const reference = isApproverSession_(session) ? cleanText_(payload.reference, 100) : session.reference;
+  const reference = isApproverSession_(session) ? cleanText_(payload.reference, 100) : referenceForSession_(session, payload.reference);
   if (!isFinite(year) || year < 1900 || year > 2100) throw new Error('Yıl geçersiz.');
   if (!donationType || !fullName || !reference) throw new Error('Referans Nevi, hesap adı ve referans zorunludur.');
   const date = new Date(year, 0, 1, 12, 0, 0, 0);
@@ -1386,7 +1388,7 @@ function saveCollection(token, payload) {
     const current = findRowBy_(APP.sheets.pledges, 1, pledgeId);
     if (!current) throw new Error('Taahhüt bulunamadı.');
     if (String(current.values[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') throw new Error('Bu kayıt şüpheli alacaklarda. Tahsilat eklemeden önce aktife geri alın.');
-    if (!isApproverSession_(session) && referenceKey_(current.values[6]) !== referenceKey_(session.reference)) throw new Error('Bu kayda erişiminiz yok.');
+    if (!isApproverSession_(session) && !sessionHasReference_(session, current.values[6])) throw new Error('Bu kayda erişiminiz yok.');
     const available = Math.max(0, (Number(current.values[9]) || 0) - pendingAmountForPledge_(pledgeId, ''));
     if (amount > available) throw new Error('Tahsilat, kalan ve onay bekleyen kayıtlar dikkate alındığında kullanılabilir ' + moneyText_(available) + ' tutarından büyük olamaz.');
     const account = findRowBy_(APP.sheets.cashAccounts, 1, accountId);
@@ -1442,7 +1444,7 @@ function saveBulkCollections(token, payload) {
       if (!record) throw new Error('Taahhüt bulunamadı: ' + pledgeId);
       const pledge = record.values;
       if (String(pledge[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') throw new Error(pledge[3] + ' kaydı şüpheli alacaklarda. Önce aktife geri alın.');
-      if (!isApproverSession_(session) && referenceKey_(pledge[6]) !== referenceKey_(session.reference)) throw new Error(pledge[3] + ' kaydına erişiminiz yok.');
+      if (!isApproverSession_(session) && !sessionHasReference_(session, pledge[6])) throw new Error(pledge[3] + ' kaydına erişiminiz yok.');
       const amount = positiveNumber_(item.amount, pledge[3] + ' tahsilat tutarı');
       const remaining = Math.max(0, (Number(pledge[9]) || 0) - pendingAmountForPledge_(pledgeId, ''));
       if (amount > remaining) throw new Error(pledge[3] + ' için tahsilat kalan ' + moneyText_(remaining) + ' tutarından büyük olamaz.');
@@ -1484,7 +1486,7 @@ function saveQuickDonation(token, payload) {
   const date = parseDate_(payload.date, 'Bağış tarihi');
   const donationType = cleanText_(payload.donationType, 80);
   const fullName = cleanText_(payload.fullName, 120);
-  const reference = isApproverSession_(session) ? cleanText_(payload.reference, 100) : session.reference;
+  const reference = isApproverSession_(session) ? cleanText_(payload.reference, 100) : referenceForSession_(session, payload.reference);
   const account = findRowBy_(APP.sheets.cashAccounts, 1, cleanText_(payload.accountId, 60));
   if (!donationType || !fullName || !reference) throw new Error('Bağış türü, bağışçı ve referans zorunludur.');
   if (!account || account.values[4] !== true) throw new Error('Aktif bir kasa veya banka hesabı seçin.');
@@ -2870,22 +2872,50 @@ function deleteExpensePayment(token, kind, paymentId) {
   return {ok:true};
 }
 
+function userReferences_(value) {
+  const source = Array.isArray(value) ? value : String(value || '').split(/[\n;|]+/);
+  const result = [], seen = {};
+  source.forEach(function(item) {
+    const name = cleanText_(item, 100);
+    const key = referenceKey_(name);
+    if (name && !seen[key]) { seen[key] = true; result.push(name); }
+  });
+  return result.slice(0, 30);
+}
+
+function userReferencesFromPayload_(payload) {
+  const source = Array.isArray(payload && payload.references) ? payload.references : [payload && payload.reference];
+  return userReferences_(source);
+}
+
+function userReferenceStorage_(references) { return userReferences_(references).join('\n'); }
+function sessionReferences_(session) { return userReferences_(session && session.references && session.references.length ? session.references : session && session.reference); }
+function sessionHasReference_(session, reference) { const key=referenceKey_(reference); return Boolean(key) && sessionReferences_(session).some(function(name){return referenceKey_(name)===key;}); }
+function referenceForSession_(session, requested) {
+  const references=sessionReferences_(session);
+  if (!references.length) throw new Error('Kullanıcı hesabına referans bağlanmamış.');
+  const value=cleanText_(requested,100) || (references.length===1 ? references[0] : '');
+  if (!value) throw new Error('İşlem yapılacak referansı seçin.');
+  if (!sessionHasReference_(session,value)) throw new Error('Seçilen referans bu kullanıcı hesabına bağlı değil.');
+  return references.find(function(name){return referenceKey_(name)===referenceKey_(value);}) || value;
+}
+
 function saveUser(token, payload) {
   const session = requireAdmin_(token);
   payload = payload || {};
   const email = normalizeEmail_(payload.email);
   const name = cleanText_(payload.name, 100);
-  const reference = cleanText_(payload.reference, 100);
+  const references = userReferencesFromPayload_(payload);
   const role = normalizeUserRole_(payload.role);
   if (!name) throw new Error('Ad soyad zorunludur.');
-  if (role === 'KULLANICI' && !reference) throw new Error('Tahsilat kullanıcısı için referans adı zorunludur.');
+  if (role === 'KULLANICI' && !references.length) throw new Error('Tahsilat kullanıcısı için en az bir referans seçilmelidir.');
   if (findRowBy_(APP.sheets.users, 3, email)) throw new Error('Bu e-posta zaten kayıtlı.');
   validatePin_(payload.pin);
   const salt = Utilities.getUuid();
   const id = makeId_('USR');
   getDb_().getSheetByName(APP.sheets.users).appendRow([
     id, name, email, role,
-    reference || name, salt, hashPin_(payload.pin, salt), true, new Date()
+    userReferenceStorage_(references.length ? references : [name]), salt, hashPin_(payload.pin, salt), true, new Date()
   ]);
   audit_(session.email, 'EKLENDİ', 'Kullanıcı', id, email);
   return {ok:true};
@@ -2900,9 +2930,9 @@ function updateUser(token, payload) {
   const name = cleanText_(payload.name, 100);
   const email = normalizeEmail_(payload.email);
   const role = normalizeUserRole_(payload.role);
-  const reference = cleanText_(payload.reference, 100);
+  const references = userReferencesFromPayload_(payload);
   if (!name || !email) throw new Error('Ad soyad ve e-posta zorunludur.');
-  if (role === 'KULLANICI' && !reference) throw new Error('Tahsilat kullanıcısı için referans adı zorunludur.');
+  if (role === 'KULLANICI' && !references.length) throw new Error('Tahsilat kullanıcısı için en az bir referans seçilmelidir.');
   if (current.values[2] === session.email && role !== 'YÖNETİCİ') throw new Error('Kendi yönetici rolünüzü kaldıramazsınız.');
   const duplicate = dataRows_(APP.sheets.users).some(function(r) { return r[0] !== id && normalizeEmail_(r[2]) === email; });
   if (duplicate) throw new Error('Bu e-posta başka bir kullanıcıda kayıtlı.');
@@ -2915,13 +2945,17 @@ function updateUser(token, payload) {
   }
   const actorEmail = session.email;
   getDb_().getSheetByName(APP.sheets.users).getRange(current.row, 2, 1, 6).setValues([[
-    name, email, role, reference || name, salt, pinHash
+    name, email, role, userReferenceStorage_(references.length ? references : [name]), salt, pinHash
   ]]);
+  const accessRevision = String(Date.now());
+  CacheService.getScriptCache().put('user-access-revision:' + id, accessRevision, APP.sessionSeconds);
   if (current.values[2] === session.email) {
     session.name = name;
     session.email = email;
     session.role = role;
-    session.reference = reference || name;
+    session.references = references.length ? references : [name];
+    session.reference = session.references[0] || '';
+    session.accessRevision = accessRevision;
     CacheService.getScriptCache().put('session:' + token, JSON.stringify(session), APP.sessionSeconds);
   }
   audit_(actorEmail, 'DÜZELTİLDİ', 'Kullanıcı', id, email + (String(payload.pin || '').trim() ? ' / PIN yenilendi' : ''));
@@ -2934,6 +2968,7 @@ function setUserActive(token, userId, active) {
   if (!row) throw new Error('Kullanıcı bulunamadı.');
   if (row.values[2] === session.email && active === false) throw new Error('Kendi hesabınızı pasif yapamazsınız.');
   getDb_().getSheetByName(APP.sheets.users).getRange(row.row, 8).setValue(Boolean(active));
+  CacheService.getScriptCache().put('user-access-revision:' + row.values[0], String(Date.now()), APP.sessionSeconds);
   audit_(session.email, active ? 'AKTİF' : 'PASİF', 'Kullanıcı', userId, row.values[2]);
   return {ok:true};
 }
@@ -3046,11 +3081,11 @@ function buildAppData_(session, filters) {
   const applyToLists = filters.applyToLists === true || String(filters.applyToLists) === 'true';
   const admin = session.role === 'YÖNETİCİ';
   const approver = isApproverSession_(session);
-  const accessiblePledgeRows = dataRows_(APP.sheets.pledges).filter(r => approver || referenceKey_(r[6]) === referenceKey_(session.reference));
+  const accessiblePledgeRows = dataRows_(APP.sheets.pledges).filter(r => approver || sessionHasReference_(session, r[6]));
   const doubtfulIds = {};
   accessiblePledgeRows.forEach(function(r) { if (String(r[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') doubtfulIds[r[0]] = true; });
   const pledgeRows = accessiblePledgeRows.filter(function(r) { return !doubtfulIds[r[0]]; });
-  const allCollectionRows = dataRows_(APP.sheets.collections).filter(function(r) { return (approver || referenceKey_(r[5]) === referenceKey_(session.reference)) && !doubtfulIds[r[2]]; });
+  const allCollectionRows = dataRows_(APP.sheets.collections).filter(function(r) { return (approver || sessionHasReference_(session, r[5])) && !doubtfulIds[r[2]]; });
   const collectionRows = allCollectionRows.filter(isCollectionApprovedRow_);
   const periodCollections = collectionRows.filter(r => inRange_(r[1], start, end));
   const periodPledges = pledgeRows.filter(r => inRange_(r[11], start, end));
@@ -3387,7 +3422,7 @@ function expenseCommitmentDto_(r, kind) { return { id:r[0], name:r[1], paymentTy
 function expensePaymentDto_(r, commitment) { return { id:r[0], date:isoDate_(r[1]), commitmentId:r[2], name:r[3], amount:n_(r[4]), method:r[5], note:r[6], accountId:r[8]||'', accountName:r[9]||'', accrualPeriod:commitment?String(commitment[3]||''):'', paymentType:commitment?String(commitment[2]||''):'' }; }
 function staffPlanDto_(r) { return { id:r[0], name:r[1], paymentType:r[2], amount:n_(r[3]), active:r[4]===true, note:r[5] }; }
 function teacherPlanDto_(r) { return { id:r[0], name:r[1], lessonName:r[2], lessonHours:n_(r[3]), hourlyRate:n_(r[4]), amount:Math.round(n_(r[3])*n_(r[4])*100)/100, active:r[5]===true, note:r[6] }; }
-function userDto_(r) { return { id:r[0], name:r[1], email:r[2], role:r[3], reference:r[4], active:r[7]===true, createdAt:isoDate_(r[8]) }; }
+function userDto_(r) { const references=userReferences_(r[4]); return { id:r[0], name:r[1], email:r[2], role:r[3], reference:references[0]||'', references:references, active:r[7]===true, createdAt:isoDate_(r[8]) }; }
 function loanDto_(r) { return {id:r[0],date:isoDate_(r[1]),lender:r[2],amount:n_(r[3]),repaid:n_(r[4]),remaining:n_(r[5]),status:r[6],accountId:r[7],accountName:r[8],note:r[9]}; }
 function loanRepaymentDto_(r) { return {id:r[0],date:isoDate_(r[1]),loanId:r[2],lender:r[3],amount:n_(r[4]),method:r[5],note:r[6],accountId:r[8],accountName:r[9]}; }
 function accountingImportDto_(r) { return {externalId:r[0],type:r[1],systemId:r[2],date:isoDate_(r[3]),amount:n_(r[4]),user:r[5],importedAt:r[6] instanceof Date?Utilities.formatDate(r[6],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[6]||'')}; }
@@ -3400,7 +3435,7 @@ function recentAccountingImports_(limit) {
 function referenceTargetData_(session, pledges, collections) {
   const admin=isApproverSession_(session);
   const today=isoDate_(new Date());
-  const rows=optionalDataRows_(APP.sheets.referenceTargets).filter(function(r){return admin||(r[6]===true&&referenceKey_(r[3])===referenceKey_(session.reference));});
+  const rows=optionalDataRows_(APP.sheets.referenceTargets).filter(function(r){return admin||(r[6]===true&&sessionHasReference_(session,r[3]));});
   const items=rows.map(function(r){
     const start=new Date(r[1]), end=new Date(r[2]); end.setHours(23,59,59,999);
     const key=referenceKey_(r[3]);
@@ -3646,7 +3681,7 @@ function uniquePledgePersonnelNames_(rows) {
 
 function uniqueReferenceNames_() {
   const map={};
-  dataRows_(APP.sheets.users).forEach(function(r){const name=cleanText_(r[4],120);if(name)map[referenceKey_(name)]=name;});
+  dataRows_(APP.sheets.users).forEach(function(r){userReferences_(r[4]).forEach(function(name){map[referenceKey_(name)]=name;});});
   const studentIds={};
   dataRows_(APP.sheets.pledges).forEach(function(r){if(isStudentPledgeRow_(r)){studentIds[String(r[0])]=true;return;}const name=cleanText_(r[6],120);if(name&&!map[referenceKey_(name)])map[referenceKey_(name)]=name;});
   dataRows_(APP.sheets.collections).forEach(function(r){if(studentIds[String(r[2])])return;const name=cleanText_(r[5],120);if(name&&!map[referenceKey_(name)])map[referenceKey_(name)]=name;});
@@ -3816,10 +3851,11 @@ function requireSession_(token) {
   const raw=cache.get(key);
   if(!raw) throw new Error('Oturum süreniz doldu. Lütfen yeniden giriş yapın.');
   const session=JSON.parse(raw);
-  if (!session.validatedAt || Date.now() - Number(session.validatedAt) > 120000) {
+  const accessRevision=cache.get('user-access-revision:' + session.userId) || '';
+  if (!session.validatedAt || accessRevision !== String(session.accessRevision || '') || Date.now() - Number(session.validatedAt) > 120000) {
     const row=findRowBy_(APP.sheets.users,1,session.userId);
     if(!row||row.values[7]!==true){cache.remove(key);throw new Error('Kullanıcı hesabı pasif veya silinmiş. Lütfen yeniden giriş yapın.');}
-    session.name=row.values[1];session.email=row.values[2];session.role=row.values[3];session.reference=row.values[4];session.validatedAt=Date.now();
+    const references=userReferences_(row.values[4]);session.name=row.values[1];session.email=row.values[2];session.role=row.values[3];session.references=references;session.reference=references[0]||'';session.accessRevision=accessRevision;session.validatedAt=Date.now();
   }
   cache.put(key,JSON.stringify(session),APP.sessionSeconds);
   return session;

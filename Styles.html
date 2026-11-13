@@ -164,4 +164,22 @@ dialog.statement-dialog .modal-card{width:min(1120px,calc(100vw - 30px))}.cash-s
 #modal.statement-dialog .movement-type{padding:3px 6px;font-size:.62rem}
 #modal.statement-dialog .money small{margin-top:2px;font-size:.6rem}
 @media(max-width:760px){#modal.statement-dialog{width:100vw;height:100dvh}#modal.statement-dialog .modal-card{border-radius:0}#modal.statement-dialog .statement-filter-card .statement-controls{grid-template-columns:1fr 1fr}#modal.statement-dialog .statement-ledger .data-table td{padding:7px 9px}}
+/* Multi-reference user access */
+.user-reference-tags{display:flex;flex-wrap:wrap;gap:5px;min-width:160px}
+.user-reference-tags span{display:inline-flex;align-items:center;padding:4px 8px;border:1px solid #c9dce7;border-radius:999px;background:#eef7fa;color:#16435b;font-size:11px;font-weight:750}
+.user-reference-tags em{color:var(--muted);font-size:12px}
+.user-reference-picker{border:1px solid #d6e2e9;border-radius:16px;padding:15px;background:linear-gradient(180deg,#f9fcfd,#f2f8fa)}
+.user-reference-picker legend{padding:0 7px;color:#14364d;font-weight:800}
+.user-reference-picker p{margin:0 0 10px;color:var(--muted);font-size:12px;line-height:1.5}
+.user-reference-picker>input{width:100%;margin-bottom:10px}
+.user-reference-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px;max-height:220px;overflow:auto;padding:3px}
+.user-reference-options label{display:flex;align-items:center;gap:9px;padding:9px 10px;border:1px solid #d9e4ea;border-radius:11px;background:#fff;cursor:pointer;font-weight:700}
+.user-reference-options label:has(input:checked){border-color:#2185a1;background:#eaf7fa;color:#0d5368;box-shadow:0 0 0 2px rgba(33,133,161,.09)}
+.user-reference-options input{width:auto;margin:0;accent-color:#16718b}
+.user-reference-custom{display:block;margin-top:11px}
+.user-reference-picker small{display:block;margin-top:7px;color:var(--muted)}
+.user-reference-single{display:flex;flex-direction:column;justify-content:center;gap:4px;padding:10px 12px;border:1px solid #d4e2e9;border-radius:12px;background:#f3f8fa}
+.user-reference-single span{color:var(--muted);font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+.user-reference-single strong{color:#12364c}
+@media(max-width:640px){.user-reference-options{grid-template-columns:1fr}}
 </style>
