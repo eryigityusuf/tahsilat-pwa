@@ -135,3 +135,31 @@ dialog.statement-dialog .modal-card{width:min(1120px,calc(100vw - 30px))}.cash-s
 .student-plan-actions{padding:14px 15px;border-color:#d6e1e6;background:linear-gradient(135deg,#fff,#f2f7f8);box-shadow:0 6px 18px rgba(15,42,67,.05)}.student-plan-actions>div:first-child{display:grid;gap:3px}.student-plan-actions>div:first-child strong{color:var(--navy);font-size:.82rem}.student-plan-actions>div:first-child span{font-weight:600}.student-plan-actions .actions{justify-content:flex-end}
 .student-installment-planner{padding:0;overflow:hidden;border-color:#c7d8de;background:#eef4f6;box-shadow:0 10px 25px rgba(15,42,67,.07)}.student-installment-head{padding:13px 15px;margin:0;border-bottom:1px solid #d5e0e5;background:#fff}.student-installment-head>div{display:grid;gap:3px}.student-installment-head>div>span{font-size:.72rem}.student-installment-count{padding:5px 8px;border-radius:999px;background:#e5f1f3;color:#17566c!important;font-size:.63rem!important;font-weight:900;letter-spacing:.06em}.student-installment-list{max-height:320px;padding:12px;scrollbar-gutter:stable}.student-installment-row{border-color:#d7e2e7;border-radius:13px;box-shadow:0 4px 12px rgba(15,42,67,.04);transition:border-color .15s,transform .15s}.student-installment-row:hover{border-color:#9bbec6;transform:translateY(-1px)}.student-installment-row>b{background:linear-gradient(145deg,#173e58,#266e7f);color:#fff;box-shadow:0 4px 10px rgba(15,54,72,.18)}.student-installment-summary{margin:0;padding:12px 15px;border-top:1px solid #cee2d5;border-radius:0;background:#eef9f2}.student-installment-summary span{display:grid;gap:3px;color:#557465;font-size:.67rem}.student-installment-summary strong{font-size:.84rem}.student-installment-summary.invalid{border-top-color:#efc1bc;background:#fff1ef}.student-plan-footnote{margin-bottom:3px}
 @media(max-width:760px){#modal.student-plan-dialog:not(.statement-dialog){width:calc(100vw - 12px)}.student-plan-intro{grid-template-columns:44px 1fr}.student-plan-limit{display:none}.student-plan-alert{align-items:flex-start;flex-direction:column}.student-plan-alert span{text-align:left}.student-plan-actions{align-items:stretch}.student-plan-actions .actions{display:grid;grid-template-columns:1fr 1fr}.student-plan-actions .btn{width:100%}.student-installment-list{max-height:42dvh}}
+
+/* High-capacity cash and bank statement */
+#modal.statement-dialog{width:min(1500px,calc(100vw - 20px));height:calc(100dvh - 20px);max-width:none;max-height:none}
+#modal.statement-dialog .modal-card{height:100%;border-radius:15px}
+#modal.statement-dialog .modal-head{min-height:46px;padding:8px 16px}
+#modal.statement-dialog .modal-head h3{font-size:1rem}
+#modal.statement-dialog .statement-hero{padding:9px 16px}
+#modal.statement-dialog .statement-hero-main{gap:3px}
+#modal.statement-dialog .statement-hero-main>strong{font-size:1.12rem}
+#modal.statement-dialog .statement-hero-balance{gap:2px}
+#modal.statement-dialog .statement-hero-balance strong{font-size:1.24rem}
+#modal.statement-dialog .statement-filter-card{margin:7px 12px 0;padding:7px 10px}
+#modal.statement-dialog .statement-filter-card .statement-controls{grid-template-columns:minmax(210px,1.35fr) 145px 145px auto;gap:8px}
+#modal.statement-dialog .statement-filter-card input,#modal.statement-dialog .statement-filter-card select{min-height:34px;padding:6px 8px}
+#modal.statement-dialog .statement-show-btn{min-height:34px;padding-top:6px;padding-bottom:6px}
+#modal.statement-dialog .statement-filter-footer{margin-top:5px;padding-top:5px}
+#modal.statement-dialog .statement-period-btn{padding:4px 8px;font-size:.66rem}
+#modal.statement-dialog .statement-results{padding:7px 12px 10px}
+#modal.statement-dialog .statement-results-head{margin-bottom:4px}
+#modal.statement-dialog .statement-summary{gap:6px;margin-bottom:5px}
+#modal.statement-dialog .statement-metric{gap:2px;padding:6px 9px;border-radius:9px}
+#modal.statement-dialog .statement-metric span{font-size:.63rem}
+#modal.statement-dialog .statement-metric strong{font-size:.84rem}
+#modal.statement-dialog .statement-ledger .data-table th{padding:7px 9px;font-size:.64rem}
+#modal.statement-dialog .statement-ledger .data-table td{padding:5px 9px;font-size:.75rem;line-height:1.12}
+#modal.statement-dialog .movement-type{padding:3px 6px;font-size:.62rem}
+#modal.statement-dialog .money small{margin-top:2px;font-size:.6rem}
+@media(max-width:760px){#modal.statement-dialog{width:100vw;height:100dvh}#modal.statement-dialog .modal-card{border-radius:0}#modal.statement-dialog .statement-filter-card .statement-controls{grid-template-columns:1fr 1fr}#modal.statement-dialog .statement-ledger .data-table td{padding:7px 9px}}
