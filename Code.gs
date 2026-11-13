@@ -814,13 +814,14 @@ function savePledge(token, payload) {
   const session = requireSession_(token);
   payload = payload || {};
   const amount = positiveNumber_(payload.amount, 'Taahhüt tutarı');
+  const date = parseDate_(payload.pledgeDate, 'Taahhüt tarihi');
   const year = Math.trunc(Number(payload.year));
   const donationType = cleanText_(payload.donationType, 80);
   const fullName = cleanText_(payload.fullName, 120);
   const reference = isApproverSession_(session) ? cleanText_(payload.reference, 100) : referenceForSession_(session, payload.reference);
   if (!isFinite(year) || year < 1900 || year > 2100) throw new Error('Yıl geçersiz.');
+  if (date.getFullYear() !== year) throw new Error('Yıl, taahhüt tarihi ile aynı olmalıdır.');
   if (!donationType || !fullName || !reference) throw new Error('Referans Nevi, hesap adı ve referans zorunludur.');
-  const date = new Date(year, 0, 1, 12, 0, 0, 0);
   const id = makeId_('TAA');
   withLock_(function() {
     appendRows_(getDb_().getSheetByName(APP.sheets.pledges), [[
@@ -840,13 +841,14 @@ function updatePledge(token, payload) {
   payload = payload || {};
   const id = cleanText_(payload.id, 60);
   const amount = positiveNumber_(payload.amount, 'Taahhüt tutarı');
+  const date = parseDate_(payload.pledgeDate, 'Taahhüt tarihi');
   const year = Math.trunc(Number(payload.year));
   const donationType = cleanText_(payload.donationType, 80);
   const fullName = cleanText_(payload.fullName, 120);
   const reference = cleanText_(payload.reference, 100);
   if (!isFinite(year) || year < 1900 || year > 2100) throw new Error('Yıl geçersiz.');
+  if (date.getFullYear() !== year) throw new Error('Yıl, taahhüt tarihi ile aynı olmalıdır.');
   if (!donationType || !fullName || !reference) throw new Error('Referans Nevi, hesap adı ve referans zorunludur.');
-  const date = new Date(year, 0, 1, 12, 0, 0, 0);
   withLock_(function() {
     const current = findRowBy_(APP.sheets.pledges, 1, id);
     if (!current) throw new Error('Taahhüt bulunamadı.');
