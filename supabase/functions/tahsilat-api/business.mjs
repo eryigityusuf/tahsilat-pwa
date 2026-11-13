@@ -7,7 +7,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 22,
+  cacheSchemaVersion: 23,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -66,7 +66,7 @@ const STAFF_PAYMENT_TYPES = Object.freeze([
 ]);
 const CURRENT_EXPENSE_TYPES = Object.freeze(['İaşe','Adak Kurban','Kırtasiye','Eğitim','Takvim']);
 const RECEIPT_EXPENSE_TYPES = Object.freeze(['Elektrik Faturası','Su Faturası','Doğalgaz Faturası','İaşe','Araç Yakıt']);
-const PLEDGE_COLUMN_KEYS = Object.freeze(['select','year','activity','subActivity','fullName','payer','phone','reference','donationType','group','amount','paid','remaining','notes']);
+const PLEDGE_COLUMN_KEYS = Object.freeze(['select','pledgeDate','year','activity','subActivity','fullName','payer','phone','reference','donationType','group','amount','paid','remaining','notes']);
 const COLLECTION_COLUMN_KEYS = Object.freeze(['year','activity','subActivity','fullName','payer','phone','reference','donationType','group','accrual','paid','remaining','notes','date','receiptNo','id','method','accountName','approvalStatus','actions']);
 
 let REQUEST_DB_CACHE_ = null;
@@ -3550,18 +3550,34 @@ function cashAccountDto_(r, collections, staffPayments, teacherPayments, loans, 
   const foreignCollected=collections.filter(function(c){return c[12]===r[0]&&String(c[22]||'')===currency;}).reduce(function(s,c){return s+(Number(c[23])||0);},0);
   return {id:r[0],name:r[1],type:r[2],openingBalance:opening,collected:collected,borrowed:borrowed,staffExpense:staffExpense,teacherExpense:teacherExpense,currentExpense:currentExpense,receiptExpense:receiptExpense,debtRepaid:debtRepaid,totalExpense:staffExpense+teacherExpense+currentExpense+receiptExpense+debtRepaid,balance:opening+collected+borrowed-staffExpense-teacherExpense-currentExpense-receiptExpense-debtRepaid,active:r[4]===true,note:r[5],currency:currency,openingForeign:openingForeign,openingRate:n_(r[9]),foreignCollected:foreignCollected,foreignBalance:openingForeign+foreignCollected};
 }
-function cashMovements_(accountRows, collections, staffPayments, teacherPayments, loans, loanRepayments, currentExpensePayments, receiptExpenses) {
+function cashMovementDescription_(primary, details, note) {
+  const parts=[];
+  const first=cleanText_(primary,160);
+  if(first)parts.push(first);
+  (details||[]).forEach(function(item){
+    const label=cleanText_(item&&item[0],40);
+    const value=cleanText_(item&&item[1],160);
+    if(value)parts.push((label?label+': ':'')+value);
+  });
+  const cleanNote=cleanText_(note,240);
+  if(cleanNote)parts.push('Not: '+cleanNote);
+  return parts.join(' · ');
+}
+function cashMovements_(accountRows, collections, staffPayments, teacherPayments, loans, loanRepayments, currentExpensePayments, receiptExpenses, staffCommitments, teacherCommitments, currentExpenses) {
   const accountMap={};accountRows.forEach(function(r){accountMap[String(r[0])]=r;});
+  const staffMap={};(staffCommitments||[]).forEach(function(r){staffMap[String(r[0])]=r;});
+  const teacherMap={};(teacherCommitments||[]).forEach(function(r){teacherMap[String(r[0])]=r;});
+  const currentMap={};(currentExpenses||[]).forEach(function(r){currentMap[String(r[0])]=r;});
   const result=[];
   function add(accountId,date,id,type,description,income,expense,currency,foreignAmount,exchangeRate){const a=accountMap[String(accountId||'')];if(!a)return;result.push({id:id,date:isoDate_(date),accountId:a[0],accountName:a[1],accountType:a[2],active:a[4]===true,type:type,description:description||'',income:n_(income),expense:n_(expense),currency:currency||'',foreignAmount:n_(foreignAmount),exchangeRate:n_(exchangeRate)});}
-  accountRows.forEach(function(r){if(n_(r[3])||n_(r[8]))add(r[0],r[6],r[0]+'-OPEN','Açılış','Açılış bakiyesi',r[3],0,r[7],r[8],r[9]);});
-  collections.forEach(function(r){add(r[12],r[1],r[0],r[2]?'Tahsilat':'Teberru',(r[3]||'')+' · '+(r[4]||''),r[7],0,r[22],r[23],r[24]);});
-  loans.forEach(function(r){add(r[7],r[1],r[0],'Borç alımı',r[2],r[3],0);});
-  staffPayments.forEach(function(r){add(r[8],r[1],r[0],'Personel ödemesi',(r[3]||'')+' · '+(r[2]||''),0,r[4]);});
-  teacherPayments.forEach(function(r){add(r[8],r[1],r[0],'Öğretmen ödemesi',(r[3]||'')+' · '+(r[2]||''),0,r[4]);});
-  loanRepayments.forEach(function(r){add(r[8],r[1],r[0],'Borç geri ödemesi',r[3],0,r[4]);});
-  currentExpensePayments.forEach(function(r){add(r[6],r[1],r[0],'Cari ödeme',r[3],0,r[4]);});
-  receiptExpenses.forEach(function(r){add(r[6],r[1],r[0],'Fiş gideri',(r[2]||'')+' · '+(r[3]||''),0,r[4]);});
+  accountRows.forEach(function(r){if(n_(r[3])||n_(r[8]))add(r[0],r[6],r[0]+'-OPEN','Açılış',cashMovementDescription_('Açılış bakiyesi',[],r[5]),r[3],0,r[7],r[8],r[9]);});
+  collections.forEach(function(r){add(r[12],r[1],r[0],r[2]?'Tahsilat':'Teberru',cashMovementDescription_(r[3],[['Faaliyet',r[20]],['Referans Nevi',r[4]],['Referans',r[5]],['Makbuz',r[18]]],r[9]),r[7],0,r[22],r[23],r[24]);});
+  loans.forEach(function(r){add(r[7],r[1],r[0],'Borç alımı',cashMovementDescription_(r[2],[['İşlem','Borç alımı']],r[9]),r[3],0);});
+  staffPayments.forEach(function(r){const c=staffMap[String(r[2])]||[];add(r[8],r[1],r[0],'Personel ödemesi',cashMovementDescription_(r[3],[['Ödeme türü',c[2]],['Dönem',c[3]]],r[6]||c[9]),0,r[4]);});
+  teacherPayments.forEach(function(r){const c=teacherMap[String(r[2])]||[];add(r[8],r[1],r[0],'Öğretmen ödemesi',cashMovementDescription_(r[3],[['Ders',c[2]],['Dönem',c[3]]],r[6]||c[9]),0,r[4]);});
+  loanRepayments.forEach(function(r){add(r[8],r[1],r[0],'Borç geri ödemesi',cashMovementDescription_(r[3],[['İşlem','Borç geri ödemesi']],r[6]),0,r[4]);});
+  currentExpensePayments.forEach(function(r){const c=currentMap[String(r[2])]||[];add(r[6],r[1],r[0],'Cari ödeme',cashMovementDescription_(r[3],[['Nevi',c[3]],['Cari yılı',c[1]]],r[8]||c[8]),0,r[4]);});
+  receiptExpenses.forEach(function(r){add(r[6],r[1],r[0],'Fiş gideri',cashMovementDescription_(r[2],[['Gider türü',r[3]]],r[8]),0,r[4]);});
   return result.sort(function(a,b){return String(b.date).localeCompare(String(a.date))||String(b.id).localeCompare(String(a.id));});
 }
 function cashData_(collections) {
@@ -3571,12 +3587,15 @@ function cashData_(collections) {
   const loanRepayments=optionalDataRows_(APP.sheets.loanRepayments);
   const currentExpensePayments=optionalDataRows_(APP.sheets.currentExpensePayments);
   const receiptExpenses=optionalDataRows_(APP.sheets.receiptExpenses);
+  const staffCommitments=optionalDataRows_(APP.sheets.staffCommitments);
+  const teacherCommitments=optionalDataRows_(APP.sheets.teacherCommitments);
+  const currentExpenses=optionalDataRows_(APP.sheets.currentExpenses);
   const accountRows=optionalDataRows_(APP.sheets.cashAccounts);
   const accounts=accountRows.map(function(r){return cashAccountDto_(r,collections,staffPayments,teacherPayments,loans,loanRepayments,currentExpensePayments,receiptExpenses);});
   const activeAccounts=accounts.filter(function(a){return a.active;});
   return {
     accounts:accounts,
-    movements:cashMovements_(accountRows,collections,staffPayments,teacherPayments,loans,loanRepayments,currentExpensePayments,receiptExpenses),
+    movements:cashMovements_(accountRows,collections,staffPayments,teacherPayments,loans,loanRepayments,currentExpensePayments,receiptExpenses,staffCommitments,teacherCommitments,currentExpenses),
     totalBalance:activeAccounts.reduce(function(s,a){return s+a.balance;},0),
     totalCollected:activeAccounts.reduce(function(s,a){return s+a.collected;},0),
     totalBorrowed:activeAccounts.reduce(function(s,a){return s+a.borrowed;},0),
