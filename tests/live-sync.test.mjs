@@ -10,6 +10,6 @@ assert.match(client, /server\('getDataRevision',state\.token\)/, 'İstemci güve
 assert.match(client, /function openApp\(\).*startRemoteDataWatcher\(\)/, 'Tüm kullanıcı oturumlarında izleyici başlamalı.');
 assert.match(client, /acceptAppData\(fresh\);updateProfile\(\);render\(\)/, 'Değişiklik tüm aktif görünümü yenilemeli.');
 assert.match(server, /function getDataRevision\(token\)\s*{\s*requireSession_\(token\)/, 'Sürüm denetimi geçerli oturum istemeli.');
-assert.match(edge, /p_sheets:method === 'getDataRevision' \? \[\] : null/, 'Sürüm denetimi veri satırlarını yüklememeli.');
+assert.match(edge, /p_sheets:method === 'getDataRevision' \? \['Kullanıcılar'\] : null/, 'Sürüm denetimi oturumun periyodik yetki doğrulaması için yalnızca kullanıcıları yüklemeli.');
 
-console.log(JSON.stringify({ intervalMs:8000, globalViews:true, sessionRequired:true, lightweight:true, ok:true }));
+console.log(JSON.stringify({ intervalMs:8000, globalViews:true, sessionRequired:true, lightweight:true, periodicSessionValidation:true, ok:true }));

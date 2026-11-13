@@ -114,9 +114,14 @@ Deno.serve(async req => {
     const owner = method === 'login' ? String(args[0] || '').trim().toLowerCase() : digest(String(args[0] || ''));
 
     for (let attempt=0; attempt<4; attempt++) {
-      // Sürüm kontrolü sekiz saniyede bir çalışır. Bu hafif çağrıda tüm veri
-      // satırlarını taşımak yerine yalnızca meta/properties ve oturumu yükle.
-      const snapshot = await rpc('tahsilat_load', { p_keys:cacheKeys(method,args), p_sheets:method === 'getDataRevision' ? [] : null });
+      // Sürüm kontrolü sekiz saniyede bir çalışır. Tüm iş verisini taşımadan
+      // yalnızca oturumun periyodik yetki doğrulamasında gereken kullanıcı
+      // satırlarını yükle. Boş liste, iki dakikalık doğrulama süresi dolunca
+      // requireSession_ içindeki kullanıcı aramasını 409 ile düşürüyordu.
+      const snapshot = await rpc('tahsilat_load', {
+        p_keys:cacheKeys(method,args),
+        p_sheets:method === 'getDataRevision' ? ['Kullanıcılar'] : null
+      });
       if (!snapshot?.initialized) return reply({ ok:false, error:{ code:'SETUP', message:'Supabase veri aktarımı henüz tamamlanmadı.' } }, 503);
       const runtime = makeRuntime(snapshot);
       const business = createBusiness(runtime);
