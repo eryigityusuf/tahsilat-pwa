@@ -3271,6 +3271,10 @@ function studentPaymentPlanDto_(pledgeRow, planRow, paymentRows) {
 function groupSubActivities_(pledges, collections, periodCollections) {
   const map = {};
   const pledgeMap = {};
+  const paymentChannelKeys = {
+    'NAKIT':true, 'BANKA':true, 'HAVALE':true, 'EFT':true, 'POS':true,
+    'KREDI KARTI':true, 'HAVALE / EFT':true, 'KART / POS':true
+  };
   function nameForPledge_(row) { return cleanText_(row && row[18],120) || cleanText_(row && row[17],120) || cleanText_(row && row[2],120) || 'Belirtilmemiş'; }
   function item_(name) {
     name = cleanText_(name,120) || 'Belirtilmemiş';
@@ -3280,15 +3284,24 @@ function groupSubActivities_(pledges, collections, periodCollections) {
   function collectionName_(row) {
     const pledge = pledgeMap[String(row && row[2] || '')];
     if (pledge) return nameForPledge_(pledge);
-    // Doğrudan teberrular yalnızca mevcut bir alt faaliyet satırıyla eşleşirse
-    // grafiğe eklenir. Öncelik Faaliyet alanındadır; Nevi ikinci seçenektir.
-    // Böylece Nakit/Banka gibi yöntem veya hesap adları yeni kategori oluşturmaz.
-    const candidates = [row && row[20], row && row[4]];
-    for (let i = 0; i < candidates.length; i++) {
-      const key = normalizeKey_(cleanText_(candidates[i], 120));
-      if (key && map[key]) return map[key].name;
+    // Doğrudan teberruda Nevi alt faaliyettir. Her gelir mutlaka bir gruba
+    // yazılır; aksi halde faaliyet ve alt faaliyet icmalleri farklı çıkar.
+    let type = cleanText_(row && row[4],120);
+    const typeHeader = normalizeHeader_(type);
+    const activity = cleanText_(row && row[20],120);
+    if (!type || paymentChannelKeys[typeHeader]) type = activity || 'Belirtilmemiş';
+    let key = normalizeKey_(type);
+    const aliases = {
+      'KURBAN':'BAGIS KURBAN',
+      'BAGISLIK KURBAN':'BAGIS KURBAN',
+      'EGITIM':'EGITIM UCRETI'
+    };
+    const aliasKey = aliases[normalizeHeader_(type)];
+    if (aliasKey) {
+      const existingKey = Object.keys(map).filter(function(k) { return normalizeHeader_(map[k].name) === aliasKey; })[0];
+      if (existingKey) key = existingKey;
     }
-    return '';
+    return map[key] ? map[key].name : type;
   }
   (pledges || []).forEach(function(r) {
     pledgeMap[String(r[0])] = r;
@@ -3310,7 +3323,7 @@ function groupActivities_(pledges, collections, periodCollections) {
   const pledgeMap = {};
   const paymentChannelKeys = {
     'NAKIT':true, 'BANKA':true, 'HAVALE':true, 'EFT':true, 'POS':true,
-    'KREDI KARTI':true, 'HAVALE / EFT':true, 'KART / POS':true, 'DIGER':true
+    'KREDI KARTI':true, 'HAVALE / EFT':true, 'KART / POS':true
   };
   function nameForPledge_(row) {
     return cleanText_(row && row[17],120) || cleanText_(row && row[2],120) || 'Belirtilmemiş';
@@ -3327,7 +3340,9 @@ function groupActivities_(pledges, collections, periodCollections) {
     if (activity) return activity;
     const legacyType = cleanText_(row && row[4],120);
     const legacyKey = normalizeHeader_(legacyType);
-    return legacyType && !paymentChannelKeys[legacyKey] ? legacyType : '';
+    // Eski kayıtlardaki Nakit/Banka değerleri kategori olarak gösterilmez;
+    // ancak gelir toplamdan da çıkarılmaz ve Belirtilmemiş altında korunur.
+    return legacyType ? (paymentChannelKeys[legacyKey] ? 'Belirtilmemiş' : legacyType) : 'Belirtilmemiş';
   }
   (pledges || []).forEach(function(r) {
     pledgeMap[String(r[0])] = r;
