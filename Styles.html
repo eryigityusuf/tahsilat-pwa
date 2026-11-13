@@ -124,6 +124,11 @@ dialog.statement-dialog .modal-card{width:min(1120px,calc(100vw - 30px))}.cash-s
 
 /* Veli teberrusu / student payment planner */
 #modal.student-plan-dialog:not(.statement-dialog){width:min(880px,calc(100vw - 36px))}
+#modal.student-plan-dialog:not(.statement-dialog) .modal-card{max-height:min(830px,calc(100dvh - 36px))}
+#modal.student-plan-dialog:not(.statement-dialog) .form-grid{gap:11px;padding:16px 18px 0}
+#modal.student-plan-dialog:not(.statement-dialog) .form-grid>label{padding:8px 10px 9px}
+#modal.student-plan-dialog:not(.statement-dialog) .form-grid>label input,#modal.student-plan-dialog:not(.statement-dialog) .form-grid>label select{min-height:39px;padding-top:9px;padding-bottom:9px}
+#modal.student-plan-dialog:not(.statement-dialog) .form-actions{margin-left:-18px;margin-right:-18px;padding:12px 18px 14px}
 .student-plan-intro{display:grid;grid-template-columns:52px minmax(0,1fr) auto;align-items:center;gap:14px;padding:15px 16px;border:1px solid rgba(213,181,106,.42);border-radius:15px;background:linear-gradient(135deg,#0f314a,#174f62);color:#fff;box-shadow:0 12px 28px rgba(10,43,62,.14)}
 .student-plan-intro-mark{display:grid;place-items:center;width:44px;height:44px;border:1px solid rgba(235,210,143,.55);border-radius:13px;background:linear-gradient(145deg,rgba(213,181,106,.26),rgba(255,255,255,.06));color:#f1d892;font-family:Georgia,serif;font-size:1.25rem;font-weight:800}
 .student-plan-intro>div:nth-child(2){display:grid;gap:4px}.student-plan-intro strong{font-family:Georgia,"Times New Roman",serif;font-size:1.02rem}.student-plan-intro span{color:#c7dce3;font-size:.76rem;line-height:1.45}.student-plan-limit{padding:6px 9px;border:1px solid rgba(235,210,143,.34);border-radius:999px;color:#e7cf90;font-size:.62rem;font-weight:900;letter-spacing:.08em;white-space:nowrap}
