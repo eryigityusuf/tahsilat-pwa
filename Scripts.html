@@ -3,7 +3,7 @@ const state={token:'',data:null,view:'dashboard',pages:{},pageSizes:{collections
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='85';
+const PWA_BUILD='86';
 const PLEDGE_REFERENCE_TYPES=['PERSONEL','İHVAN','AHAVAT'];
 const SUPABASE_API='https://yrhirwtwokzmixfbjlde.supabase.co/functions/v1/tahsilat-api';
 const IDLE_SESSION_MS=30*60*1000;
@@ -209,6 +209,7 @@ async function removeAllPledges(){
   try{const r=await server('deleteAllPledges',state.token,approval);state.pledgeTab='active';alert(`${r.pledgeCount} taahhüt ve ${r.collectionCount} tahsilat hareketi silindi.\n\nSilmeden önce otomatik yedek oluşturuldu:\n${r.backupUrl}`);toast('Toplu silme tamamlandı ve Drive yedeği oluşturuldu.');scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
 }
 function collectionAccountingView(x){const p=(state.data.pledges||[]).find(y=>y.id===x.pledgeId)||{};return {year:p.year||String(x.date||'').slice(0,4),activity:x.activity||p.activity||'',subActivity:p.subActivity||'',accountCode:p.accountCode||'',fullName:x.fullName||p.fullName||'',payer:x.payer||p.payer||'',phone:x.phone||p.phone||'',reference:x.reference||p.reference||'',donationType:x.donationType||p.donationType||'',group:x.group||p.group||'',accrual:x.direct?0:Number(p.amount)||0,paid:Number(x.amount)||0,remaining:x.direct?0:Number(p.remaining)||0,notes:x.note||p.notes||''}}
+function collectionTransferAction(x){if(!isApprover()||state.collectionBulkEdit?.active)return '';if(x.direct)return `<button class="btn tiny secondary" onclick="donationToCollectionModal('${esc(x.id)}')">Tahsilata aktar</button>`;const pledge=(state.data.pledges||[]).find(p=>p.id===x.pledgeId);if(pledge&&pledge.source==='ÖĞRENCİ')return '';return `<button class="btn tiny secondary" onclick="convertCollectionToDonation('${esc(x.id)}')">Teberruya aktar</button>`}
 function collectionColumnDefinitions(){const approver=isApprover();return [
   {key:'year',label:'YIL',cell:(x,a)=>esc(a.year)},
   {key:'activity',label:'FAALİYET',cell:(x,a)=>esc(a.activity)},
@@ -229,7 +230,7 @@ function collectionColumnDefinitions(){const approver=isApprover();return [
   {key:'method',label:'YÖNTEM',cell:x=>esc(x.method)},
   {key:'accountName',label:'KASA / BANKA',cell:x=>esc(x.accountName||'')},
   {key:'approvalStatus',label:'ONAY',cell:x=>`<span class="status ${statusClass(x.approvalStatus)}">${esc(x.approvalStatus)}</span>`},
-  {key:'actions',label:'İŞLEM',available:approver,cell:x=>`<div class="row-actions"><button class="btn tiny" onclick="editCollectionModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeCollection('${esc(x.id)}')">Sil</button></div>`}
+  {key:'actions',label:'İŞLEM',available:approver,cell:x=>`<div class="row-actions">${collectionTransferAction(x)}<button class="btn tiny" onclick="editCollectionModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeCollection('${esc(x.id)}')">Sil</button></div>`}
 ].filter(c=>c.available!==false)}
 function visibleCollectionColumnDefinitions(){return collectionColumnDefinitions().filter(c=>state.collectionTab!=='donations'||c.key!=='receiptNo')}
 function collectionColumnsModal(){const hidden=new Set(state.collectionHiddenColumns||[]);const definitions=visibleCollectionColumnDefinitions();const fields=`<div class="wide pledge-column-chooser"><p>Tabloda görmek istediğiniz tahsilat sütunlarını seçin. Seçiminiz kullanıcı hesabınızda saklanır ve giriş yaptığınız diğer cihazlarda da uygulanır.</p><div class="pledge-column-tools"><button class="btn tiny secondary" type="button" onclick="setAllCollectionColumnCheckboxes(true)">Tümünü göster</button><button class="btn tiny" type="button" onclick="setAllCollectionColumnCheckboxes(false)">Tümünü temizle</button></div><div class="pledge-column-grid">${definitions.map(c=>`<label class="pledge-column-item"><input type="checkbox" data-collection-column="${c.key}" ${hidden.has(c.key)?'':'checked'}><span>${esc(c.label)}</span></label>`).join('')}</div></div>`;showModal('Görünen tahsilat sütunları',formHtml(fields,'applyCollectionColumnVisibility()'))}
@@ -297,6 +298,27 @@ function renderCollections(){
   const panelTitle=state.collectionTab==='donations'?'Teberru hareketleri':'Taahhüde bağlı tahsilatlar';
   const editNote=editing?`<div class="bulk-edit-banner"><strong>Toplu düzenleme açık.</strong><span>Düzenlenebilir hücrelerin üzerine tıklayın. Tahsilatlar ve Teberru sekmeleri ile sayfalar arasında geçebilirsiniz; taslaklar Tümünü Kaydet'e kadar korunur. Soluk alanlar hesaplanan veya bağlı taahhütten gelen kilitli alanlardır.</span></div>`:'';
   $('#content').innerHTML=panel(panelTitle,editNote+tabs+table(visibleColumns.map(c=>c.label),rows)+paged.controls+filterSummary,actions,'Filtreler yalnızca seçili sekmedeki listeyi ve aşağıdaki toplamları etkiler. Bekleyen ve reddedilen kayıtlar kasa, gelir ve taahhüt bakiyesini etkilemez.');
+}
+
+async function convertCollectionToDonation(id){
+  const x=(state.data.collections||[]).find(r=>r.id===id);if(!x)return;
+  if(!confirm(`${x.fullName||'Seçili tahsilat'} kaydı teberruya aktarılsın mı?\n\nKasa hareketi, tarih ve tutar korunur. Bağlı taahhüdün ödenen ve kalan bakiyesi yeniden hesaplanır.`))return;
+  setBusy(true);
+  try{await server('convertCollectionToDonation',state.token,id);state.collectionTab='donations';resetPage('collections');toast('Kayıt teberruya aktarıldı. Veriler eşitleniyor.');scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
+}
+function donationToCollectionModal(id){
+  const x=(state.data.collections||[]).find(r=>r.id===id);if(!x||!x.direct)return;
+  const amount=Number(x.amount)||0;
+  const pledges=(state.data.pledges||[]).filter(p=>String(p.receivableStatus||'AKTİF').toUpperCase()!=='ŞÜPHELİ'&&(Number(p.remaining)||0)+0.001>=amount).sort((a,b)=>String(a.fullName||'').localeCompare(String(b.fullName||''),'tr'));
+  if(!pledges.length){toast('Bu tutarı karşılayabilecek açık taahhüt bulunamadı.',true);return}
+  const picker=searchPickerHtml('transferPledge',pledges,p=>`<strong>${esc(p.fullName)}</strong><span>${esc(p.activity||p.subActivity||p.donationType)} · ${esc(p.reference||'Referans yok')} · Kalan ${money(p.remaining)}</span>`);
+  const info=`<div class="wide conversion-summary"><span>Teberru kaydı</span><strong>${esc(x.fullName||'')} · ${money(x.amount)}</strong><p>Hedef taahhüdü arayıp seçin. Tarih, kasa/banka, ödeme yöntemi ve tutar korunacak; kayıt seçilen taahhüdün bakiyesine işlenecektir.</p></div>`;
+  showModal('Teberruyu tahsilata aktar',formHtml(info+picker,`submitDonationToCollection('${esc(id)}')`));
+}
+async function submitDonationToCollection(id){
+  const pledgeId=$('#transferPledgeSelected')?.value||'';if(!pledgeId){toast('Arama sonucundan hedef taahhüdü seçin.',true);return}
+  setBusy(true);
+  try{await server('convertDonationToCollection',state.token,id,pledgeId);if($('#modal').open)$('#modal').close();state.collectionTab='collections';resetPage('collections');toast('Teberru tahsilata aktarıldı. Taahhüt bakiyesi yeniden hesaplanıyor.');scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
 }
 
 async function removeAllDonations(){

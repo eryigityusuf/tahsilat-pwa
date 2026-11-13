@@ -1565,6 +1565,62 @@ function updateCollection(token, payload) {
   return {ok:true};
 }
 
+function convertCollectionToDonation(token, collectionId) {
+  const session = requireApprover_(token);
+  const id = cleanText_(collectionId, 60);
+  let result = null;
+  withLock_(function() {
+    const current = findRowBy_(APP.sheets.collections, 1, id);
+    if (!current) throw new Error('Tahsilat kaydı bulunamadı.');
+    const pledgeId = String(current.values[2] || '');
+    if (!pledgeId) throw new Error('Bu kayıt zaten teberru olarak bulunuyor.');
+    const pledge = findRowBy_(APP.sheets.pledges, 1, pledgeId);
+    if (!pledge) throw new Error('Bağlı taahhüt bulunamadı.');
+    if (isStudentPledgeRow_(pledge.values)) throw new Error('Öğrenci tahsilatları teberruya aktarılamaz.');
+    const sh = getDb_().getSheetByName(APP.sheets.collections);
+    sh.getRange(current.row, 3).setValue('');
+    sh.getRange(current.row, 20, 1, 3).setValues([[
+      cleanText_(pledge.values[20], 80), cleanText_(pledge.values[17], 120), cleanText_(pledge.values[4], 30)
+    ]]);
+    resetRequestCache_();
+    recalculatePledge_(pledgeId);
+    audit_(session.email, 'TAHSİLATTAN_TEBERRUYA_AKTARILDI', 'Tahsilat', id, pledgeId + ' / ' + (Number(current.values[7]) || 0) + ' TL');
+    result = {ok:true, id:id, previousPledgeId:pledgeId, target:'TEBERRU'};
+  });
+  return result;
+}
+
+function convertDonationToCollection(token, collectionId, targetPledgeId) {
+  const session = requireApprover_(token);
+  const id = cleanText_(collectionId, 60);
+  const pledgeId = cleanText_(targetPledgeId, 60);
+  let result = null;
+  withLock_(function() {
+    const current = findRowBy_(APP.sheets.collections, 1, id);
+    if (!current) throw new Error('Teberru kaydı bulunamadı.');
+    if (String(current.values[2] || '')) throw new Error('Bu kayıt zaten bir taahhüde bağlı tahsilattır.');
+    const pledge = findRowBy_(APP.sheets.pledges, 1, pledgeId);
+    if (!pledge) throw new Error('Hedef taahhüt bulunamadı.');
+    if (String(pledge.values[15] || 'AKTİF').toUpperCase() === 'ŞÜPHELİ') throw new Error('Hedef taahhüt şüpheli alacaklarda. Önce aktife geri alın.');
+    const amount = Number(current.values[7]) || 0;
+    const available = Math.max(0, (Number(pledge.values[9]) || 0) - pendingAmountForPledge_(pledgeId, ''));
+    if (amount > available + 0.001) throw new Error('Teberru tutarı, hedef taahhüdün kullanılabilir ' + moneyText_(available) + ' bakiyesinden büyük olamaz.');
+    const sh = getDb_().getSheetByName(APP.sheets.collections);
+    sh.getRange(current.row, 3).setValue(pledgeId);
+    sh.getRange(current.row, 4, 1, 4).setValues([[
+      pledge.values[3], pledge.values[2], pledge.values[6], pledge.values[5]
+    ]]);
+    sh.getRange(current.row, 20, 1, 3).setValues([[
+      cleanText_(pledge.values[20], 80), cleanText_(pledge.values[17], 120), cleanText_(pledge.values[4], 30)
+    ]]);
+    resetRequestCache_();
+    recalculatePledge_(pledgeId);
+    audit_(session.email, 'TEBERRUDAN_TAHSİLATA_AKTARILDI', 'Tahsilat', id, pledgeId + ' / ' + amount + ' TL');
+    result = {ok:true, id:id, pledgeId:pledgeId, target:'TAHSİLAT'};
+  });
+  return result;
+}
+
 /**
  * Tahsilatlar ve doğrudan teberrular için tek istekle toplu hücre düzenleme.
  * Tüm değişiklikler önce bellekte doğrulanır; doğrulama tamamlanmadan sayfaya
@@ -3986,7 +4042,7 @@ function makeId_(prefix){ return prefix+'-'+Utilities.formatDate(new Date(),'Eur
     return originalRestorePledgeBackup(token, payload);
   };
 
-  const api = { approveCollection, bulkImportAccounting, bulkImportDonations, bulkSavePledges, bulkUpdateCollections, convertPledgesToStudentAccruals, copyReferenceTargetsMonth, copyStaffCommitmentsMonth, copyTeacherAccrualsMonth, deleteAllDonations, deleteAllPledges, deleteCollection, deleteCurrentExpense, deleteCurrentExpensePayment, deleteExpensePayment, deleteLoan, deleteLoanRepayment, deletePledge, deleteReceiptExpense, deleteReferenceTarget, deleteStaffAccrual, deleteTeacherAccrual, generateFullDataBackup, generateMonthlyStaffCommitments, generateMonthlyTeacherAccruals, generatePersonnelPledgePdf, generateReferenceTargetsPdf, generateTeacherPaymentReceiptPdf, getAppData, getDataRevision, login, logout, reconcileSystem, rejectCollection, reopenCollectionApproval, restorePledgeBackup, saveBulkCollections, saveBulkExpensePayments, saveBulkReferenceTargets, saveCashAccount, saveCollection, saveCollectionColumnPreferences, saveCurrentExpense, saveCurrentExpensePayment, saveExpenseCommitment, saveExpensePayment, saveLoan, saveLoanRepayment, savePledge, savePledgeColumnPreferences, saveQuickDonation, saveReceiptExpense, saveReferenceTarget, saveStaffPlanSet, saveStudentAccrual, saveTeacherPlan, saveUser, setCashAccountActive, setPledgeReceivableStatus, setReferenceTargetActive, setStaffPlanActive, setTeacherPlanActive, setUserActive, touchSession, updateCashAccount, updateCollection, updateCurrentExpense, updateCurrentExpensePayment, updateExpensePayment, updateLoan, updateLoanRepayment, updatePledge, updateReceiptExpense, updateReferenceTarget, updateStaffAccrual, updateStaffPlan, updateStudentAccrual, updateTeacherAccrual, updateTeacherPlan, updateUser };
+  const api = { approveCollection, bulkImportAccounting, bulkImportDonations, bulkSavePledges, bulkUpdateCollections, convertCollectionToDonation, convertDonationToCollection, convertPledgesToStudentAccruals, copyReferenceTargetsMonth, copyStaffCommitmentsMonth, copyTeacherAccrualsMonth, deleteAllDonations, deleteAllPledges, deleteCollection, deleteCurrentExpense, deleteCurrentExpensePayment, deleteExpensePayment, deleteLoan, deleteLoanRepayment, deletePledge, deleteReceiptExpense, deleteReferenceTarget, deleteStaffAccrual, deleteTeacherAccrual, generateFullDataBackup, generateMonthlyStaffCommitments, generateMonthlyTeacherAccruals, generatePersonnelPledgePdf, generateReferenceTargetsPdf, generateTeacherPaymentReceiptPdf, getAppData, getDataRevision, login, logout, reconcileSystem, rejectCollection, reopenCollectionApproval, restorePledgeBackup, saveBulkCollections, saveBulkExpensePayments, saveBulkReferenceTargets, saveCashAccount, saveCollection, saveCollectionColumnPreferences, saveCurrentExpense, saveCurrentExpensePayment, saveExpenseCommitment, saveExpensePayment, saveLoan, saveLoanRepayment, savePledge, savePledgeColumnPreferences, saveQuickDonation, saveReceiptExpense, saveReferenceTarget, saveStaffPlanSet, saveStudentAccrual, saveTeacherPlan, saveUser, setCashAccountActive, setPledgeReceivableStatus, setReferenceTargetActive, setStaffPlanActive, setTeacherPlanActive, setUserActive, touchSession, updateCashAccount, updateCollection, updateCurrentExpense, updateCurrentExpensePayment, updateExpensePayment, updateLoan, updateLoanRepayment, updatePledge, updateReceiptExpense, updateReferenceTarget, updateStaffAccrual, updateStaffPlan, updateStudentAccrual, updateTeacherAccrual, updateTeacherPlan, updateUser };
   const googleMethods = new Set(["generatePersonnelPledgePdf","generateReferenceTargetsPdf","generateTeacherPaymentReceiptPdf"]);
   return {
     googleMethods,
