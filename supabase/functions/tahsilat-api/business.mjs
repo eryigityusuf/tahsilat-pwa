@@ -3288,12 +3288,12 @@ function groupSubActivities_(pledges, collections, periodCollections) {
   function collectionName_(row) {
     const pledge = pledgeMap[String(row && row[2] || '')];
     if (pledge) return nameForPledge_(pledge);
-    // Doğrudan teberruda Nevi alt faaliyettir. Her gelir mutlaka bir gruba
-    // yazılır; aksi halde faaliyet ve alt faaliyet icmalleri farklı çıkar.
-    let type = cleanText_(row && row[4],120);
-    const typeHeader = normalizeHeader_(type);
     const activity = cleanText_(row && row[20],120);
-    if (!type || paymentChannelKeys[typeHeader]) type = activity || 'Belirtilmemiş';
+    // Doğrudan teberruda ayrı bir alt faaliyet alanı yoktur. Faaliyet değeri
+    // alt faaliyet icmalinde de kullanılır; Referans Nevi kategoriye karışmaz.
+    let type = activity || 'Belirtilmemiş';
+    const typeHeader = normalizeHeader_(type);
+    if (paymentChannelKeys[typeHeader]) type = 'Belirtilmemiş';
     let key = normalizeKey_(type);
     const aliases = {
       'KURBAN':'BAGIS KURBAN',
@@ -3371,8 +3371,10 @@ function groupReferenceTypes_(pledges, periodCollections) {
   (pledges || []).forEach(function(row) { pledgeMap[String(row[0] || '')] = row; });
   (periodCollections || []).forEach(function(row) {
     const pledge = pledgeMap[String(row[2] || '')];
-    if (!pledge) return;
-    const name = cleanText_(pledge[2], 80) || 'Belirtilmemiş';
+    // Taahhüde bağlı tahsilatlarda Referans Nevi taahhütten; doğrudan
+    // teberrularda ise tahsilat satırından okunur. Böylece üç icmal aynı
+    // onaylı dönem tahsilatı havuzunu kullanır ve toplamları eşit kalır.
+    const name = cleanText_(pledge ? pledge[2] : row[4], 80) || 'Belirtilmemiş';
     const key = normalizeKey_(name) || 'belirtilmemis';
     const item = map[key] || (map[key] = { name:name, period:0 });
     item.period += Number(row[7] || 0);
