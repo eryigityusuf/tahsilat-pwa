@@ -3157,6 +3157,7 @@ function buildAppData_(session, filters) {
   const pledgeRows = accessiblePledgeRows.filter(function(r) { return !doubtfulIds[r[0]]; });
   const allCollectionRows = dataRows_(APP.sheets.collections).filter(function(r) { return (approver || sessionHasReference_(session, r[5])) && !doubtfulIds[r[2]]; });
   const collectionRows = allCollectionRows.filter(isCollectionApprovedRow_);
+  const collectionRemainingAfter = collectionRemainingAfterMap_(accessiblePledgeRows, allCollectionRows);
   const periodCollections = collectionRows.filter(r => inRange_(r[1], start, end));
   const periodPledges = pledgeRows.filter(r => inRange_(r[11], start, end));
   const referencePledgeRows = pledgeRows.filter(function(r) { return !isStudentPledgeRow_(r); });
@@ -3193,7 +3194,7 @@ function buildAppData_(session, filters) {
     // dönemsel tahsilat/analizleri süzer; aksi halde Ekim tahsilatları görünürken yıl başı
     // tarihli taahhütler yanlışlıkla listeden kayboluyordu.
     pledges: accessiblePledgeRows.slice().reverse().map(pledgeDto_),
-    collections: (applyToLists?allCollectionRows.filter(function(r){return inRange_(r[1],start,end);}):allCollectionRows).slice().reverse().map(collectionDto_),
+    collections: (applyToLists?allCollectionRows.filter(function(r){return inRange_(r[1],start,end);}):allCollectionRows).slice().reverse().map(function(r){return collectionDtoWithBalance_(r,collectionRemainingAfter);}),
     donationAnalysis: groupSubActivities_(pledgeRows, collectionRows, periodCollections),
     activityAnalysis: groupActivities_(pledgeRows, collectionRows, periodCollections),
     referenceTypeAnalysis: groupReferenceTypes_(pledgeRows, periodCollections),
@@ -3206,7 +3207,7 @@ function buildAppData_(session, filters) {
   };
   if (approver) {
     response.approvals = {
-      items: allCollectionRows.slice().reverse().map(collectionDto_),
+      items: allCollectionRows.slice().reverse().map(function(r){return collectionDtoWithBalance_(r,collectionRemainingAfter);}),
       pendingCount: allCollectionRows.filter(function(r){return collectionApprovalStatus_(r)==='BEKLİYOR';}).length,
       pendingTotal: allCollectionRows.filter(function(r){return collectionApprovalStatus_(r)==='BEKLİYOR';}).reduce(function(s,r){return s+(Number(r[7])||0);},0)
     };
@@ -3524,6 +3525,21 @@ function expenseRemainingItems_(commitments) {
 
 function pledgeDto_(r) { return { id:r[0], year:r[1], donationType:r[2], fullName:r[3], phone:r[4], payer:r[5], reference:r[6], amount:n_(r[7]), paid:n_(r[8]), remaining:n_(r[9]), status:r[10], pledgeDate:isoDate_(r[11]), personnel:r[14]||'', receivableStatus:String(r[15]||'AKTİF').toUpperCase(), source:String(r[16]||'BAĞIŞ').toUpperCase(), activity:r[17]||'', subActivity:r[18]||'', accountCode:r[19]||'', group:r[20]||'', notes:r[21]||'' }; }
 function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:r[3], donationType:r[4], reference:r[5], payer:r[6], amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'', receiptNo:r[18]||'', group:r[19]||'', activity:r[20]||'', phone:r[21]||'', currency:r[22]||'', foreignAmount:n_(r[23]), exchangeRate:n_(r[24]), referenceType:r[25]||'' }; }
+function collectionRemainingAfterMap_(pledges, collections) {
+  const amounts={};(pledges||[]).forEach(function(r){amounts[String(r[0])]=Number(r[7])||0;});
+  const indexed=(collections||[]).map(function(r,index){return {row:r,index:index};}).filter(function(x){return Boolean(String(x.row[2]||'').trim());});
+  indexed.sort(function(a,b){
+    const dateCompare=isoDate_(a.row[1]).localeCompare(isoDate_(b.row[1]));if(dateCompare)return dateCompare;
+    const aCreated=a.row[11] instanceof Date?a.row[11].getTime():String(a.row[11]||'');
+    const bCreated=b.row[11] instanceof Date?b.row[11].getTime():String(b.row[11]||'');
+    if(typeof aCreated==='number'&&typeof bCreated==='number'&&aCreated!==bCreated)return aCreated-bCreated;
+    const createdCompare=String(aCreated).localeCompare(String(bCreated));if(createdCompare)return createdCompare;
+    return a.index-b.index;
+  });
+  const paid={},result={};indexed.forEach(function(x){const r=x.row,id=String(r[2]);if(isCollectionApprovedRow_(r))paid[id]=(paid[id]||0)+(Number(r[7])||0);result[String(r[0])]=Math.max(0,Math.round(((amounts[id]||0)-(paid[id]||0))*100)/100);});
+  return result;
+}
+function collectionDtoWithBalance_(r, remainingMap) { const dto=collectionDto_(r);dto.remainingAfter=dto.direct?0:(Object.prototype.hasOwnProperty.call(remainingMap||{},String(r[0]))?n_(remainingMap[String(r[0])]):null);return dto; }
 function expenseCommitmentDto_(r, kind) { return { id:r[0], name:r[1], paymentType:r[2], period:r[3], total:n_(r[4]), paid:n_(r[5]), remaining:n_(r[6]), dueDate:isoDate_(r[7]), status:r[8], note:r[9], lessonHours:kind==='teacher'?n_(r[11]):0, hourlyRate:kind==='teacher'?n_(r[12]):0 }; }
 function expensePaymentDto_(r, commitment) { return { id:r[0], date:isoDate_(r[1]), commitmentId:r[2], name:r[3], amount:n_(r[4]), method:r[5], note:r[6], accountId:r[8]||'', accountName:r[9]||'', accrualPeriod:commitment?String(commitment[3]||''):'', paymentType:commitment?String(commitment[2]||''):'' }; }
 function staffPlanDto_(r) { return { id:r[0], name:r[1], paymentType:r[2], amount:n_(r[3]), active:r[4]===true, note:r[5] }; }

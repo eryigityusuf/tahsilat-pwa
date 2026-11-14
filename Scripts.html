@@ -3,7 +3,7 @@ const state={token:'',data:null,view:'dashboard',pages:{},pageSizes:{collections
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='87';
+const PWA_BUILD='88';
 const PLEDGE_REFERENCE_TYPES=['PERSONEL','İHVAN','AHAVAT'];
 const SUPABASE_API='https://yrhirwtwokzmixfbjlde.supabase.co/functions/v1/tahsilat-api';
 const IDLE_SESSION_MS=30*60*1000;
@@ -208,7 +208,9 @@ async function removeAllPledges(){
   setBusy(true);
   try{const r=await server('deleteAllPledges',state.token,approval);state.pledgeTab='active';alert(`${r.pledgeCount} taahhüt ve ${r.collectionCount} tahsilat hareketi silindi.\n\nSilmeden önce otomatik yedek oluşturuldu:\n${r.backupUrl}`);toast('Toplu silme tamamlandı ve Drive yedeği oluşturuldu.');scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
 }
-function collectionAccountingView(x){const p=(state.data.pledges||[]).find(y=>y.id===x.pledgeId)||{};return {year:p.year||String(x.date||'').slice(0,4),activity:x.activity||p.activity||'',subActivity:p.subActivity||'',accountCode:p.accountCode||'',fullName:x.fullName||p.fullName||'',payer:x.payer||p.payer||'',phone:x.phone||p.phone||'',reference:x.reference||p.reference||'',donationType:x.direct?(x.referenceType||x.donationType||''):(x.donationType||p.donationType||''),group:x.group||p.group||'',accrual:x.direct?0:Number(p.amount)||0,paid:Number(x.amount)||0,remaining:x.direct?0:Number(p.remaining)||0,notes:x.note||p.notes||''}}
+function collectionAccountingView(x){const p=(state.data.pledges||[]).find(y=>y.id===x.pledgeId)||{};const historicalRemaining=x.remainingAfter===null||x.remainingAfter===undefined?Number(p.remaining)||0:Number(x.remainingAfter)||0;return {year:p.year||String(x.date||'').slice(0,4),activity:x.activity||p.activity||'',subActivity:p.subActivity||'',accountCode:p.accountCode||'',fullName:x.fullName||p.fullName||'',payer:x.payer||p.payer||'',phone:x.phone||p.phone||'',reference:x.reference||p.reference||'',donationType:x.direct?(x.referenceType||x.donationType||''):(x.donationType||p.donationType||''),group:x.group||p.group||'',accrual:x.direct?0:Number(p.amount)||0,paid:Number(x.amount)||0,remaining:x.direct?0:historicalRemaining,notes:x.note||p.notes||''}}
+function collectionChronologyKey(x){return [String(x.date||''),String(x.createdAt||''),String(x.id||'')].join('|')}
+function collectionFilteredTotals(filtered){const totals={accrual:0,paid:0,remaining:0};const pledges=new Map();filtered.forEach(r=>{totals.paid+=Number(r.a.paid)||0;if(r.x.direct||!r.x.pledgeId)return;const key=String(r.x.pledgeId);const existing=pledges.get(key);const order=collectionChronologyKey(r.x);if(!existing)pledges.set(key,{accrual:Number(r.a.accrual)||0,remaining:Number(r.a.remaining)||0,order:order});else if(order>=existing.order){existing.remaining=Number(r.a.remaining)||0;existing.order=order}});pledges.forEach(x=>{totals.accrual+=x.accrual;totals.remaining+=x.remaining});return totals}
 function collectionTransferAction(x){if(!isApprover()||state.collectionBulkEdit?.active)return '';if(x.direct)return `<button class="btn tiny secondary" onclick="donationToCollectionModal('${esc(x.id)}')">Tahsilata aktar</button>`;const pledge=(state.data.pledges||[]).find(p=>p.id===x.pledgeId);if(pledge&&pledge.source==='ÖĞRENCİ')return '';return `<button class="btn tiny secondary" onclick="convertCollectionToDonation('${esc(x.id)}')">Teberruya aktar</button>`}
 function collectionColumnDefinitions(){const approver=isApprover();return [
   {key:'year',label:'YIL',cell:(x,a)=>esc(a.year)},
@@ -285,7 +287,7 @@ function renderCollections(){
   const records=filtered.map(r=>r.x);const accountingMap={};filtered.forEach(r=>accountingMap[r.x.id]=r.a);
   const paged=pageData('collections',records);const columnDefs=visibleCollectionColumnDefinitions();const hiddenColumns=new Set(state.collectionHiddenColumns||[]);let visibleColumns=columnDefs.filter(c=>!hiddenColumns.has(c.key));if(!visibleColumns.length){state.collectionHiddenColumns=[];visibleColumns=columnDefs.slice()}
   const editing=Boolean(state.collectionBulkEdit&&state.collectionBulkEdit.active);const rows=paged.items.map(x=>{const a=accountingMap[x.id]||collectionAccountingView(x);return `<tr${editing?' class="bulk-edit-row"':''}>${visibleColumns.map(c=>`<td${c.className?` class="${c.className}"`:''}>${editing?collectionBulkCell(c,x,a):c.cell(x,a)}</td>`).join('')}</tr>`});
-  const totals=filtered.reduce((s,r)=>{s.accrual+=Number(r.a.accrual)||0;s.paid+=Number(r.a.paid)||0;s.remaining+=Number(r.a.remaining)||0;return s},{accrual:0,paid:0,remaining:0});
+  const totals=collectionFilteredTotals(filtered);
   const activeCount=collectionFilterCount();const filterSummary=`<div class="pledge-filter-summary"><div><span>Filtrelenen kayıt</span><strong>${records.length}</strong></div><div><span>Toplam tahakkuk</span><strong>${money(totals.accrual)}</strong></div><div><span>Toplam tahsilat</span><strong>${money(totals.paid)}</strong></div><div><span>Toplam kalan</span><strong>${money(totals.remaining)}</strong></div></div>`;
   const deleteDonations=state.data.user.role==='YÖNETİCİ'?'<button class="btn danger" onclick="removeAllDonations()">Tüm teberruları sil</button>':'';
   const donationActions=isApprover()?`<button class="btn secondary" onclick="downloadBulkDonationTemplate()">Bağış şablonu indir</button><button class="btn secondary" onclick="bulkDonationImportModal()">Toplu teberru aktar</button>${deleteDonations}`:'';
