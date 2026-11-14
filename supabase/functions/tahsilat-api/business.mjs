@@ -26,7 +26,6 @@ const APP = Object.freeze({
     teacherPayments: 'Öğretmen Ödeme Hareketleri',
     currentExpenses: 'Cari Giderler',
     currentExpensePayments: 'Cari Ödeme Hareketleri',
-    currentExpenseTahakkuks: 'Cari Tahakkuk Hareketleri',
     receiptExpenses: 'Fiş Giderleri',
     studentPlans: 'Öğrenci Ödeme Planları',
     accountingImports: 'Muhasebe Aktarımları',
@@ -52,7 +51,6 @@ const HEADERS = Object.freeze({
   teacherPayments: ['Hareket ID','Tarih','Ödeme ID','Öğretmen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturma Zamanı','Hesap ID','Hesap Adı'],
   currentExpenses: ['Cari ID','Cari Yılı','Cari Adı','Nevi','Tutar','Ödenen','Kalan','Durum','Açıklama','Oluşturma Zamanı'],
   currentExpensePayments: ['Hareket ID','Tarih','Cari ID','Cari Adı','Tutar','Ödeme Yöntemi','Hesap ID','Hesap Adı','Açıklama','Oluşturma Zamanı'],
-  currentExpenseTahakkuks: ['Tahakkuk ID','Tarih','Cari ID','Cari Adı','Tutar','Açıklama','Oluşturan','Oluşturma Zamanı'],
   receiptExpenses: ['Gider ID','Tarih','Gider Adı','Gider Türü','Tutar','Ödeme Şekli','Hesap ID','Hesap Adı','Açıklama','Oluşturma Zamanı'],
   studentPlans: ['Plan ID','Tahakkuk ID','Toplam Bedel','Peşinat','Taksit Sayısı','İlk Taksit Tarihi','Aylık Taksit','Oluşturma Zamanı','Güncelleme Zamanı','Taksit Planı'],
   accountingImports: ['Muhasebe Kayıt No','İşlem Türü','Sistem Kayıt No','Tarih','Tutar','Aktaran','Aktarım Zamanı'],
@@ -123,7 +121,6 @@ function setupSystem(adminName, adminEmail, adminPin) {
   createSheet_(ss, APP.sheets.teacherPayments, HEADERS.teacherPayments);
   createSheet_(ss, APP.sheets.currentExpenses, HEADERS.currentExpenses);
   createSheet_(ss, APP.sheets.currentExpensePayments, HEADERS.currentExpensePayments);
-  createSheet_(ss, APP.sheets.currentExpenseTahakkuks, HEADERS.currentExpenseTahakkuks);
   createSheet_(ss, APP.sheets.receiptExpenses, HEADERS.receiptExpenses);
   createSheet_(ss, APP.sheets.studentPlans, HEADERS.studentPlans);
   createSheet_(ss, APP.sheets.accountingImports, HEADERS.accountingImports);
@@ -158,7 +155,6 @@ function upgradeSystem() {
   if (!ss.getSheetByName(APP.sheets.userPreferences)) createSheet_(ss, APP.sheets.userPreferences, HEADERS.userPreferences);
   if (!ss.getSheetByName(APP.sheets.currentExpenses)) createSheet_(ss, APP.sheets.currentExpenses, HEADERS.currentExpenses);
   if (!ss.getSheetByName(APP.sheets.currentExpensePayments)) createSheet_(ss, APP.sheets.currentExpensePayments, HEADERS.currentExpensePayments);
-  if (!ss.getSheetByName(APP.sheets.currentExpenseTahakkuks)) createSheet_(ss, APP.sheets.currentExpenseTahakkuks, HEADERS.currentExpenseTahakkuks);
   if (!ss.getSheetByName(APP.sheets.receiptExpenses)) createSheet_(ss, APP.sheets.receiptExpenses, HEADERS.receiptExpenses);
   ensureSheetHeaders_(ss.getSheetByName(APP.sheets.collections), HEADERS.collections);
   ensureSheetHeaders_(ss.getSheetByName(APP.sheets.cashAccounts), HEADERS.cashAccounts);
@@ -2343,50 +2339,6 @@ function deleteCurrentExpensePayment(token, paymentId) {
   return {ok:true};
 }
 
-function saveCurrentExpenseTahakkuk(token, payload) {
-  const session = requireAdmin_(token);
-  payload = payload || {};
-  const currentId = cleanText_(payload.currentId, 60);
-  const current = findRowBy_(APP.sheets.currentExpenses, 1, currentId);
-  if (!current) throw new Error('Cari gider kaydı bulunamadı.');
-  const amount = positiveNumber_(payload.amount, 'Tahakkuk tutarı');
-  const date = parseDate_(payload.date, 'Tahakkuk tarihi');
-  const id = makeId_('CTH');
-  if (!getDb_().getSheetByName(APP.sheets.currentExpenseTahakkuks)) {
-    createSheet_(getDb_(), APP.sheets.currentExpenseTahakkuks, HEADERS.currentExpenseTahakkuks);
-  }
-  appendRows_(getDb_().getSheetByName(APP.sheets.currentExpenseTahakkuks), [[
-    id, date, currentId, current.values[2], amount, cleanText_(payload.note, 300), session.email, new Date()
-  ]], HEADERS.currentExpenseTahakkuks.length);
-  audit_(session.email, 'EKLENDİ', 'Cari Tahakkuk', id, current.values[2] + ' / ' + amount + ' TL');
-  return {ok:true};
-}
-function updateCurrentExpenseTahakkuk(token, payload) {
-  const session = requireAdmin_(token);
-  payload = payload || {};
-  const id = cleanText_(payload.id, 60);
-  const tahakkukSheet = getDb_().getSheetByName(APP.sheets.currentExpenseTahakkuks);
-  if (!tahakkukSheet) throw new Error('Tahakkuk sayfası bulunamadı.');
-  const existing = findRowBy_(APP.sheets.currentExpenseTahakkuks, 1, id);
-  if (!existing) throw new Error('Tahakkuk kaydı bulunamadı.');
-  const amount = positiveNumber_(payload.amount, 'Tahakkuk tutarı');
-  const date = parseDate_(payload.date, 'Tahakkuk tarihi');
-  tahakkukSheet.getRange(existing.row, 2, 1, 4).setValues([[date, existing.values[2], existing.values[3], amount]]);
-  tahakkukSheet.getRange(existing.row, 6).setValue(cleanText_(payload.note, 300));
-  audit_(session.email, 'DÜZELTİLDİ', 'Cari Tahakkuk', id, amount + ' TL');
-  return {ok:true};
-}
-function deleteCurrentExpenseTahakkuk(token, tahakkukId) {
-  const session = requireAdmin_(token);
-  const id = cleanText_(tahakkukId, 60);
-  const tahakkukSheet = getDb_().getSheetByName(APP.sheets.currentExpenseTahakkuks);
-  if (!tahakkukSheet) throw new Error('Tahakkuk sayfası bulunamadı.');
-  const existing = findRowBy_(APP.sheets.currentExpenseTahakkuks, 1, id);
-  if (!existing) throw new Error('Tahakkuk kaydı bulunamadı.');
-  tahakkukSheet.deleteRow(existing.row);
-  audit_(session.email, 'SİLİNDİ', 'Cari Tahakkuk', id, existing.values[3] + ' / ' + existing.values[4] + ' TL');
-  return {ok:true};
-}
 function saveReceiptExpense(token, payload) {
   const session = requireAdmin_(token);
   payload = payload || {};
@@ -3621,15 +3573,13 @@ function debtData_(start,end,applyToLists) {
 function generalExpenseData_(start,end,applyToLists) {
   const currentRows=optionalDataRows_(APP.sheets.currentExpenses);
   const paymentRows=optionalDataRows_(APP.sheets.currentExpensePayments);
-  const tahakkukRows=optionalDataRows_(APP.sheets.currentExpenseTahakkuks);
   const receiptRows=optionalDataRows_(APP.sheets.receiptExpenses);
   const visiblePayments=applyToLists?paymentRows.filter(function(r){return inRange_(r[1],start,end);}):paymentRows;
-  const visibleTahakkuks=applyToLists?tahakkukRows.filter(function(r){return inRange_(r[1],start,end);}):tahakkukRows;
   const visibleReceipts=applyToLists?receiptRows.filter(function(r){return inRange_(r[1],start,end);}):receiptRows;
   return {
     current:currentRows.slice().reverse().map(currentExpenseDto_),
     payments:visiblePayments.slice().reverse().map(currentExpensePaymentDto_),
-    tahakkuks:visibleTahakkuks.slice().reverse().map(currentExpenseTahakkukDto_),
+    allPayments:paymentRows.slice().reverse().map(currentExpensePaymentDto_),
     receipts:visibleReceipts.slice().reverse().map(receiptExpenseDto_),
     currentTypes:CURRENT_EXPENSE_TYPES.slice(),
     receiptTypes:RECEIPT_EXPENSE_TYPES.slice(),
@@ -3643,7 +3593,7 @@ function generalExpenseData_(start,end,applyToLists) {
     }
   };
 }
-function currentExpenseDto_(r){return {id:r[0],year:r[1],name:r[2],type:r[3],amount:n_(r[4]),paid:n_(r[5]),remaining:n_(r[6]),status:r[7],note:r[8]||''};}
+function currentExpenseDto_(r){return {id:r[0],year:r[1],name:r[2],type:r[3],amount:n_(r[4]),paid:n_(r[5]),remaining:n_(r[6]),status:r[7],note:r[8]||'',createdAt:isoDate_(r[9])};}
 function currentExpensePaymentDto_(r){return {id:r[0],date:isoDate_(r[1]),currentId:r[2],name:r[3],amount:n_(r[4]),method:r[5],accountId:r[6],accountName:r[7],note:r[8]||''};}
 function receiptExpenseDto_(r){return {id:r[0],date:isoDate_(r[1]),name:r[2],type:r[3],amount:n_(r[4]),method:r[5],accountId:r[6],accountName:r[7],note:r[8]||''};}
 function cashAccountDto_(r, collections, staffPayments, teacherPayments, loans, loanRepayments, currentExpensePayments, receiptExpenses) {
@@ -4096,7 +4046,7 @@ function makeId_(prefix){ return prefix+'-'+Utilities.formatDate(new Date(),'Eur
     return originalRestorePledgeBackup(token, payload);
   };
 
-  const api = { approveCollection, bulkImportAccounting, bulkImportDonations, bulkSavePledges, bulkUpdateCollections, convertCollectionToDonation, convertDonationToCollection, convertPledgesToStudentAccruals, copyReferenceTargetsMonth, copyStaffCommitmentsMonth, copyTeacherAccrualsMonth, deleteAllDonations, deleteAllPledges, deleteCollection, deleteCurrentExpense, deleteCurrentExpensePayment, deleteCurrentExpenseTahakkuk, deleteExpensePayment, deleteLoan, deleteLoanRepayment, deletePledge, deleteReceiptExpense, deleteReferenceTarget, deleteStaffAccrual, deleteTeacherAccrual, generateFullDataBackup, generateMonthlyStaffCommitments, generateMonthlyTeacherAccruals, generatePersonnelPledgePdf, generateReferenceTargetsPdf, generateTeacherPaymentReceiptPdf, getAppData, getDataRevision, login, logout, reconcileSystem, rejectCollection, reopenCollectionApproval, restorePledgeBackup, saveBulkCollections, saveBulkExpensePayments, saveBulkReferenceTargets, saveCashAccount, saveCollection, saveCollectionColumnPreferences, saveCurrentExpense, saveCurrentExpensePayment, saveCurrentExpenseTahakkuk, saveExpenseCommitment, saveExpensePayment, saveLoan, saveLoanRepayment, savePledge, savePledgeColumnPreferences, saveQuickDonation, saveReceiptExpense, saveReferenceTarget, saveStaffPlanSet, saveStudentAccrual, saveTeacherPlan, saveUser, setCashAccountActive, setPledgeReceivableStatus, setReferenceTargetActive, setStaffPlanActive, setTeacherPlanActive, setUserActive, touchSession, updateCashAccount, updateCollection, updateCurrentExpense, updateCurrentExpensePayment, updateCurrentExpenseTahakkuk, updateExpensePayment, updateLoan, updateLoanRepayment, updatePledge, updateReceiptExpense, updateReferenceTarget, updateStaffAccrual, updateStaffPlan, updateStudentAccrual, updateTeacherAccrual, updateTeacherPlan, updateUser };
+  const api = { approveCollection, bulkImportAccounting, bulkImportDonations, bulkSavePledges, bulkUpdateCollections, convertCollectionToDonation, convertDonationToCollection, convertPledgesToStudentAccruals, copyReferenceTargetsMonth, copyStaffCommitmentsMonth, copyTeacherAccrualsMonth, deleteAllDonations, deleteAllPledges, deleteCollection, deleteCurrentExpense, deleteCurrentExpensePayment, deleteExpensePayment, deleteLoan, deleteLoanRepayment, deletePledge, deleteReceiptExpense, deleteReferenceTarget, deleteStaffAccrual, deleteTeacherAccrual, generateFullDataBackup, generateMonthlyStaffCommitments, generateMonthlyTeacherAccruals, generatePersonnelPledgePdf, generateReferenceTargetsPdf, generateTeacherPaymentReceiptPdf, getAppData, getDataRevision, login, logout, reconcileSystem, rejectCollection, reopenCollectionApproval, restorePledgeBackup, saveBulkCollections, saveBulkExpensePayments, saveBulkReferenceTargets, saveCashAccount, saveCollection, saveCollectionColumnPreferences, saveCurrentExpense, saveCurrentExpensePayment, saveExpenseCommitment, saveExpensePayment, saveLoan, saveLoanRepayment, savePledge, savePledgeColumnPreferences, saveQuickDonation, saveReceiptExpense, saveReferenceTarget, saveStaffPlanSet, saveStudentAccrual, saveTeacherPlan, saveUser, setCashAccountActive, setPledgeReceivableStatus, setReferenceTargetActive, setStaffPlanActive, setTeacherPlanActive, setUserActive, touchSession, updateCashAccount, updateCollection, updateCurrentExpense, updateCurrentExpensePayment, updateExpensePayment, updateLoan, updateLoanRepayment, updatePledge, updateReceiptExpense, updateReferenceTarget, updateStaffAccrual, updateStaffPlan, updateStudentAccrual, updateTeacherAccrual, updateTeacherPlan, updateUser };
   const googleMethods = new Set(["generatePersonnelPledgePdf","generateReferenceTargetsPdf","generateTeacherPaymentReceiptPdf"]);
   return {
     googleMethods,

@@ -34,7 +34,7 @@ const HEADERS = Object.freeze({
   users: ['Kullanıcı ID','Ad Soyad','E-posta','Rol','Referans Adı','PIN Salt','PIN Özeti','Aktif','Oluşturma Tarihi'],
   types: ['Bağış Türü','Aktif'],
   pledges: ['Taahhüt ID','Yıl','Bağış Türü','Ad Soyad','Telefon','Ödeyen','Referans','Taahhüt Tutarı','Ödenen','Kalan','Durum','Taahhüt Tarihi','Oluşturan','Oluşturma Zamanı','Personel','Alacak Durumu','Kayıt Kaynağı','Faaliyet','Alt Faaliyet','Hesap Kodu','Grubu','Notlar'],
-  collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni','Makbuz No','Grubu','Faaliyet','Telefon','Döviz Cinsi','Döviz Tutarı','Döviz Kuru'],
+  collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni','Makbuz No','Grubu','Faaliyet','Telefon','Döviz Cinsi','Döviz Tutarı','Döviz Kuru','Referans Nevi'],
   referenceTargets: ['Hedef ID','Başlangıç','Bitiş','Referans','Teberru Hedefi','Tahsilat Hedefi','Aktif','Açıklama','Oluşturma Zamanı','Hedef Türü'],
   cashAccounts: ['Hesap ID','Hesap Adı','Hesap Türü','Açılış Bakiyesi','Aktif','Açıklama','Oluşturma Zamanı','Para Birimi','Açılış Döviz','Açılış Kuru'],
   loans: ['Borç ID','Alım Tarihi','Borç Veren','Alınan Tutar','Geri Ödenen','Kalan Borç','Durum','Hesap ID','Hesap Adı','Açıklama','Oluşturma Zamanı'],
@@ -1502,10 +1502,13 @@ function saveQuickDonation(token, payload) {
   withLock_(function() {
     const collectionSheet = getDb_().getSheetByName(APP.sheets.collections);
     ensureSheetHeaders_(collectionSheet, HEADERS.collections);
-    appendRows_(collectionSheet, [collectionRowWithFx_([
+    const refType = cleanText_(payload.referenceType, 30);
+    const fxRow = collectionRowWithFx_([
       id, date, '', fullName, donationType, reference, cleanText_(payload.payer, 120), amount,
       cleanText_(payload.method, 50), cleanText_(payload.note, 300), session.email, new Date(), account.values[0], account.values[1]
-    ].concat(collectionApprovalMeta_(session)), fx)], HEADERS.collections.length);
+    ].concat(collectionApprovalMeta_(session)), fx);
+    fxRow[25] = refType;
+    appendRows_(collectionSheet, [fxRow], HEADERS.collections.length);
     audit_(session.email, isApproverSession_(session) ? 'HIZLI_BAĞIŞ_ONAYLANDI' : 'HIZLI_BAĞIŞ_ONAYA_GÖNDERİLDİ', 'Doğrudan Gelir', id, fullName + ' / ' + amount + ' TL / ' + account.values[1]);
   });
   return {ok:true, approvalStatus:isApproverSession_(session)?'ONAYLANDI':'BEKLİYOR'};
@@ -1549,7 +1552,7 @@ function updateCollection(token, payload) {
     }
     const sh = getDb_().getSheetByName(APP.sheets.collections);
     sh.getRange(current.row, 2).setValue(date);
-    if (directMeta) sh.getRange(current.row, 4, 1, 4).setValues([directMeta]);
+    if (directMeta) { sh.getRange(current.row, 4, 1, 4).setValues([directMeta]); sh.getRange(current.row, 26).setValue(cleanText_(payload.referenceType || '', 30)); }
     sh.getRange(current.row, 8, 1, 3).setValues([[amount, cleanText_(payload.method, 50), cleanText_(payload.note, 300)]]);
     sh.getRange(current.row, 13, 1, 2).setValues([[account.values[0], account.values[1]]]);
     ensureSheetHeaders_(sh, HEADERS.collections);
@@ -3516,7 +3519,7 @@ function expenseRemainingItems_(commitments) {
 }
 
 function pledgeDto_(r) { return { id:r[0], year:r[1], donationType:r[2], fullName:r[3], phone:r[4], payer:r[5], reference:r[6], amount:n_(r[7]), paid:n_(r[8]), remaining:n_(r[9]), status:r[10], pledgeDate:isoDate_(r[11]), personnel:r[14]||'', receivableStatus:String(r[15]||'AKTİF').toUpperCase(), source:String(r[16]||'BAĞIŞ').toUpperCase(), activity:r[17]||'', subActivity:r[18]||'', accountCode:r[19]||'', group:r[20]||'', notes:r[21]||'' }; }
-function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:r[3], donationType:r[4], reference:r[5], payer:r[6], amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'', receiptNo:r[18]||'', group:r[19]||'', activity:r[20]||'', phone:r[21]||'', currency:r[22]||'', foreignAmount:n_(r[23]), exchangeRate:n_(r[24]) }; }
+function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:r[3], donationType:r[4], reference:r[5], payer:r[6], amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'', receiptNo:r[18]||'', group:r[19]||'', activity:r[20]||'', phone:r[21]||'', currency:r[22]||'', foreignAmount:n_(r[23]), exchangeRate:n_(r[24]), referenceType:r[25]||'' }; }
 function expenseCommitmentDto_(r, kind) { return { id:r[0], name:r[1], paymentType:r[2], period:r[3], total:n_(r[4]), paid:n_(r[5]), remaining:n_(r[6]), dueDate:isoDate_(r[7]), status:r[8], note:r[9], lessonHours:kind==='teacher'?n_(r[11]):0, hourlyRate:kind==='teacher'?n_(r[12]):0 }; }
 function expensePaymentDto_(r, commitment) { return { id:r[0], date:isoDate_(r[1]), commitmentId:r[2], name:r[3], amount:n_(r[4]), method:r[5], note:r[6], accountId:r[8]||'', accountName:r[9]||'', accrualPeriod:commitment?String(commitment[3]||''):'', paymentType:commitment?String(commitment[2]||''):'' }; }
 function staffPlanDto_(r) { return { id:r[0], name:r[1], paymentType:r[2], amount:n_(r[3]), active:r[4]===true, note:r[5] }; }
@@ -3572,6 +3575,7 @@ function generalExpenseData_(start,end,applyToLists) {
   return {
     current:currentRows.slice().reverse().map(currentExpenseDto_),
     payments:visiblePayments.slice().reverse().map(currentExpensePaymentDto_),
+    allPayments:paymentRows.slice().reverse().map(currentExpensePaymentDto_),
     receipts:visibleReceipts.slice().reverse().map(receiptExpenseDto_),
     currentTypes:CURRENT_EXPENSE_TYPES.slice(),
     receiptTypes:RECEIPT_EXPENSE_TYPES.slice(),
@@ -3585,7 +3589,7 @@ function generalExpenseData_(start,end,applyToLists) {
     }
   };
 }
-function currentExpenseDto_(r){return {id:r[0],year:r[1],name:r[2],type:r[3],amount:n_(r[4]),paid:n_(r[5]),remaining:n_(r[6]),status:r[7],note:r[8]||''};}
+function currentExpenseDto_(r){return {id:r[0],year:r[1],name:r[2],type:r[3],amount:n_(r[4]),paid:n_(r[5]),remaining:n_(r[6]),status:r[7],note:r[8]||'',createdAt:isoDate_(r[9])};}
 function currentExpensePaymentDto_(r){return {id:r[0],date:isoDate_(r[1]),currentId:r[2],name:r[3],amount:n_(r[4]),method:r[5],accountId:r[6],accountName:r[7],note:r[8]||''};}
 function receiptExpenseDto_(r){return {id:r[0],date:isoDate_(r[1]),name:r[2],type:r[3],amount:n_(r[4]),method:r[5],accountId:r[6],accountName:r[7],note:r[8]||''};}
 function cashAccountDto_(r, collections, staffPayments, teacherPayments, loans, loanRepayments, currentExpensePayments, receiptExpenses) {
