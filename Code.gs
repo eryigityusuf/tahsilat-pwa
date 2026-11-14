@@ -4059,5 +4059,8 @@ function isoDate_(v){ if(!v)return ''; const d=v instanceof Date?v:new Date(v); 
 
 function n_(v){ return Number(v)||0; }
 function sum_(rows,index){ return rows.reduce((s,r)=>s+(Number(r[index])||0),0); }
-function makeId_(prefix){ return prefix+'-'+Utilities.formatDate(new Date(),'Europe/Istanbul','yyyyMMddHHmmss')+'-'+Math.floor(1000+Math.random()*9000); }
+function makeId_(prefix){
+  const uniquePart = Utilities.getUuid().replace(/-/g, '').slice(0, 12).toUpperCase();
+  return prefix+'-'+Utilities.formatDate(new Date(),'Europe/Istanbul','yyyyMMddHHmmss')+'-'+uniquePart;
+}
 
