@@ -905,9 +905,17 @@ function updateStudentAccrual(token, payload) {
   const id = cleanText_(payload.id, 60);
   const amount = positiveNumber_(payload.amount, 'Tahakkuk tutarı');
   const date = parseDate_(payload.accrualDate, 'Tahakkuk tarihi');
+  const year = Number(payload.year || date.getFullYear());
   const studentName = cleanText_(payload.studentName, 120);
   const feeType = cleanText_(payload.feeType, 80);
-  if (!studentName || !feeType) throw new Error('Öğrenci adı ve ödeme türü zorunludur.');
+  const reference = cleanText_(payload.reference, 100);
+  const activity = cleanText_(payload.activity, 120);
+  const subActivity = cleanText_(payload.subActivity, 120);
+  const group = cleanText_(payload.group, 80);
+  const notes = cleanText_(payload.notes, 500);
+  if (!isFinite(year) || year < 1900 || year > 2100) throw new Error('Yıl geçersiz.');
+  if (date.getFullYear() !== year) throw new Error('Yıl, taahhüt tarihi ile aynı olmalıdır.');
+  if (!studentName || !feeType || !reference) throw new Error('Hesap adı, Referans Nevi ve referans zorunludur.');
   const plan = studentPlanInput_(payload, amount, date);
   withLock_(function() {
     const current = findRowBy_(APP.sheets.pledges, 1, id);
@@ -919,14 +927,21 @@ function updateStudentAccrual(token, payload) {
     const payer = cleanText_(payload.payer, 120);
     const sh = getDb_().getSheetByName(APP.sheets.pledges);
     sh.getRange(current.row, 2, 1, 11).setValues([[
-      date.getFullYear(), feeType, studentName, cleanText_(payload.phone, 30), payer, '',
+      year, feeType, studentName, cleanText_(payload.phone, 30), payer, reference,
       amount, paid, remaining, status, date
     ]]);
     sh.getRange(current.row, 17).setValue('ÖĞRENCİ');
+    sh.getRange(current.row, 18, 1, 5).setValues([[
+      activity, subActivity, '', group, notes
+    ]]);
     upsertStudentPlan_(getDb_(), id, plan);
     const collectionSheet = getDb_().getSheetByName(APP.sheets.collections);
     dataRows_(APP.sheets.collections).forEach(function(r, index) {
-      if (r[2] === id) collectionSheet.getRange(index + 2, 4, 1, 4).setValues([[studentName, feeType, '', payer]]);
+      if (r[2] !== id) return;
+      const row = index + 2;
+      collectionSheet.getRange(row, 4, 1, 4).setValues([[studentName, feeType, reference, payer]]);
+      collectionSheet.getRange(row, 20, 1, 3).setValues([[group, activity, cleanText_(payload.phone, 30)]]);
+      collectionSheet.getRange(row, 26).setValue(feeType);
     });
     audit_(session.email, 'DÜZELTİLDİ', 'Öğrenci Tahakkuku', id, studentName + ' / ' + amount + ' TL');
   });
