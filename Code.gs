@@ -31,7 +31,7 @@ const APP = Object.freeze({
 });
 
 const HEADERS = Object.freeze({
-  users: ['Kullanıcı ID','Ad Soyad','E-posta','Rol','Referans Adı','PIN Salt','PIN Özeti','Aktif','Oluşturma Tarihi'],
+  users: ['Kullanıcı ID','Ad Soyad','E-posta','Rol','Referans Adı','PIN Salt','PIN Özeti','Aktif','Oluşturma Tarihi','Son Başarılı Giriş','Son Hatalı Giriş','Hatalı Giriş Sayısı','Son Giriş Durumu'],
   types: ['Bağış Türü','Aktif'],
   pledges: ['Taahhüt ID','Yıl','Bağış Türü','Ad Soyad','Telefon','Ödeyen','Referans','Taahhüt Tutarı','Ödenen','Kalan','Durum','Taahhüt Tarihi','Oluşturan','Oluşturma Zamanı','Personel','Alacak Durumu','Kayıt Kaynağı','Faaliyet','Alt Faaliyet','Hesap Kodu','Grubu','Notlar'],
   collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni','Makbuz No','Grubu','Faaliyet','Telefon','Döviz Cinsi','Döviz Tutarı','Döviz Kuru','Referans Nevi'],
@@ -338,17 +338,31 @@ function importExistingPledges(sourceSpreadsheetId, sourceSheetName) {
 function login(email, pin) {
   resetRequestCache_();
   email = normalizeEmail_(email);
-  validateLoginPin_(pin);
   const attemptKey = 'login-attempt:' + email;
   const cache = CacheService.getScriptCache();
   const attempts = Number(cache.get(attemptKey) || 0);
-  if (attempts >= 5) throw new Error('Çok fazla hatalı giriş yapıldı. 15 dakika sonra tekrar deneyin.');
+  const usersSheet = getDb_().getSheetByName(APP.sheets.users);
+  ensureSheetHeaders_(usersSheet, HEADERS.users);
   const row = findRowBy_(APP.sheets.users, 3, email);
-  if (!row || row.values[7] !== true || hashPin_(pin, row.values[5]) !== row.values[6]) {
-    cache.put(attemptKey, String(attempts + 1), 900);
+  if (attempts >= 5) {
+    if (row) usersSheet.getRange(row.row, 11, 1, 3).setValues([[new Date(), Number(row.values[11]) || 0, 'ENGELLENDİ']]);
+    audit_(email, 'GİRİŞ_ENGELLENDİ', 'Oturum', row ? row.values[0] : '', '15 dakikalık giriş sınırı etkin.');
+    throw new Error('Çok fazla hatalı giriş yapıldı. 15 dakika sonra tekrar deneyin.');
+  }
+  let validPin = false;
+  try {
+    validateLoginPin_(pin);
+    validPin = Boolean(row && row.values[7] === true && hashPin_(pin, row.values[5]) === row.values[6]);
+  } catch (e) { validPin = false; }
+  if (!validPin) {
+    const failedAttempts = attempts + 1;
+    cache.put(attemptKey, String(failedAttempts), 900);
+    if (row) usersSheet.getRange(row.row, 11, 1, 3).setValues([[new Date(), (Number(row.values[11]) || 0) + 1, failedAttempts >= 5 ? 'ENGELLENDİ' : 'HATALI']]);
+    audit_(email, failedAttempts >= 5 ? 'GİRİŞ_ENGELLENDİ' : 'GİRİŞ_HATALI', 'Oturum', row ? row.values[0] : '', 'Başarısız giriş denemesi.');
     throw new Error('E-posta veya PIN hatalı.');
   }
   cache.remove(attemptKey);
+  usersSheet.getRange(row.row, 10, 1, 4).setValues([[new Date(), row.values[10] || '', Number(row.values[11]) || 0, 'BAŞARILI']]);
   const token = Utilities.getUuid() + Utilities.getUuid();
   const references = userReferences_(row.values[4]);
   const accessRevision = cache.get('user-access-revision:' + row.values[0]) || '';
@@ -3054,6 +3068,18 @@ function setUserActive(token, userId, active) {
   return {ok:true};
 }
 
+function resetUserLoginAttempts(token, userId) {
+  const session = requireAdmin_(token);
+  const row = findRowBy_(APP.sheets.users, 1, cleanText_(userId, 60));
+  if (!row) throw new Error('Kullanıcı bulunamadı.');
+  const email = normalizeEmail_(row.values[2]);
+  CacheService.getScriptCache().remove('login-attempt:' + email);
+  ensureSheetHeaders_(getDb_().getSheetByName(APP.sheets.users), HEADERS.users);
+  getDb_().getSheetByName(APP.sheets.users).getRange(row.row, 13).setValue('KİLİT AÇILDI');
+  audit_(session.email, 'GİRİŞ_KİLİDİ_AÇILDI', 'Kullanıcı', row.values[0], email);
+  return {ok:true};
+}
+
 function userPreferencesSheet_() {
   const ss = getDb_();
   let sh = ss.getSheetByName(APP.sheets.userPreferences);
@@ -3555,7 +3581,11 @@ function expenseCommitmentDto_(r, kind) { return { id:r[0], name:r[1], paymentTy
 function expensePaymentDto_(r, commitment) { return { id:r[0], date:isoDate_(r[1]), commitmentId:r[2], name:r[3], amount:n_(r[4]), method:r[5], note:r[6], accountId:r[8]||'', accountName:r[9]||'', accrualPeriod:commitment?String(commitment[3]||''):'', paymentType:commitment?String(commitment[2]||''):'' }; }
 function staffPlanDto_(r) { return { id:r[0], name:r[1], paymentType:r[2], amount:n_(r[3]), active:r[4]===true, note:r[5] }; }
 function teacherPlanDto_(r) { return { id:r[0], name:r[1], lessonName:r[2], lessonHours:n_(r[3]), hourlyRate:n_(r[4]), amount:Math.round(n_(r[3])*n_(r[4])*100)/100, active:r[5]===true, note:r[6] }; }
-function userDto_(r) { const references=userReferences_(r[4]); return { id:r[0], name:r[1], email:r[2], role:r[3], reference:references[0]||'', references:references, active:r[7]===true, createdAt:isoDate_(r[8]) }; }
+function userDto_(r) {
+  const references=userReferences_(r[4]);
+  function loginTime_(value) { return value instanceof Date ? Utilities.formatDate(value,'Europe/Istanbul','dd.MM.yyyy HH:mm') : String(value||''); }
+  return { id:r[0], name:r[1], email:r[2], role:r[3], reference:references[0]||'', references:references, active:r[7]===true, createdAt:isoDate_(r[8]), lastLoginAt:loginTime_(r[9]), lastFailedLoginAt:loginTime_(r[10]), failedLoginCount:Number(r[11])||0, lastLoginStatus:String(r[12]||'HENÜZ GİRİŞ YOK') };
+}
 function loanDto_(r) { return {id:r[0],date:isoDate_(r[1]),lender:r[2],amount:n_(r[3]),repaid:n_(r[4]),remaining:n_(r[5]),status:r[6],accountId:r[7],accountName:r[8],note:r[9]}; }
 function loanRepaymentDto_(r) { return {id:r[0],date:isoDate_(r[1]),loanId:r[2],lender:r[3],amount:n_(r[4]),method:r[5],note:r[6],accountId:r[8],accountName:r[9]}; }
 function accountingImportDto_(r) { return {externalId:r[0],type:r[1],systemId:r[2],date:isoDate_(r[3]),amount:n_(r[4]),user:r[5],importedAt:r[6] instanceof Date?Utilities.formatDate(r[6],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[6]||'')}; }
