@@ -3,7 +3,7 @@ const state={token:'',data:null,view:'dashboard',pages:{},pageSizes:{collections
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='94';
+const PWA_BUILD='95';
 const PLEDGE_REFERENCE_TYPES=['PERSONEL','İHVAN','AHAVAT'];
 const SUPABASE_API='https://yrhirwtwokzmixfbjlde.supabase.co/functions/v1/tahsilat-api';
 const IDLE_SESSION_MS=30*60*1000;
@@ -235,7 +235,7 @@ async function removeAllPledges(){
   setBusy(true);
   try{const r=await server('deleteAllPledges',state.token,approval);state.pledgeTab='active';alert(`${r.pledgeCount} taahhüt ve ${r.collectionCount} tahsilat hareketi silindi.\n\nSilmeden önce otomatik yedek oluşturuldu:\n${r.backupUrl}`);toast('Toplu silme tamamlandı ve Drive yedeği oluşturuldu.');scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
 }
-function collectionAccountingView(x){const p=(state.data.pledges||[]).find(y=>y.id===x.pledgeId)||{};const historicalRemaining=x.remainingAfter===null||x.remainingAfter===undefined?Number(p.remaining)||0:Number(x.remainingAfter)||0;return {year:p.year||String(x.date||'').slice(0,4),activity:x.activity||p.activity||'',subActivity:p.subActivity||'',accountCode:p.accountCode||'',fullName:x.fullName||p.fullName||'',payer:x.payer||p.payer||'',phone:x.phone||p.phone||'',reference:x.reference||p.reference||'',donationType:x.direct?(x.referenceType||x.donationType||''):(x.donationType||p.donationType||''),group:x.group||p.group||'',accrual:x.direct?0:Number(p.amount)||0,paid:Number(x.amount)||0,remaining:x.direct?0:historicalRemaining,notes:x.note||p.notes||''}}
+function collectionAccountingView(x){const p=(state.data.pledges||[]).find(y=>y.id===x.pledgeId)||{};const historicalRemaining=x.remainingAfter===null||x.remainingAfter===undefined?Number(p.remaining)||0:Number(x.remainingAfter)||0;return {year:p.year||String(x.date||'').slice(0,4),activity:x.activity||p.activity||'',subActivity:p.subActivity||'',accountCode:p.accountCode||'',fullName:x.fullName||p.fullName||'',payer:x.payer||p.payer||'',phone:x.phone||p.phone||'',reference:x.reference||p.reference||'',donationType:x.direct?(x.referenceType??(['PERSONEL','İHVAN','AHAVAT'].includes(x.donationType)?x.donationType:'')):(p.donationType||x.donationType||''),group:x.group||p.group||'',accrual:x.direct?0:Number(p.amount)||0,paid:Number(x.amount)||0,remaining:x.direct?0:historicalRemaining,notes:x.note||p.notes||''}}
 function collectionChronologyKey(x){return [String(x.date||''),String(x.createdAt||''),String(x.id||'')].join('|')}
 function collectionFilteredTotals(filtered){const totals={accrual:0,paid:0,remaining:0};const pledges=new Map();filtered.forEach(r=>{totals.paid+=Number(r.a.paid)||0;if(r.x.direct||!r.x.pledgeId)return;const key=String(r.x.pledgeId);const existing=pledges.get(key);const order=collectionChronologyKey(r.x);if(!existing)pledges.set(key,{accrual:Number(r.a.accrual)||0,remaining:Number(r.a.remaining)||0,order:order});else if(order>=existing.order){existing.remaining=Number(r.a.remaining)||0;existing.order=order}});pledges.forEach(x=>{totals.accrual+=x.accrual;totals.remaining+=x.remaining});return totals}
 function collectionTransferAction(x){if(!isApprover()||state.collectionBulkEdit?.active)return '';if(x.direct)return `<button class="btn tiny secondary" onclick="donationToCollectionModal('${esc(x.id)}')">Tahsilata aktar</button>`;const pledge=(state.data.pledges||[]).find(p=>p.id===x.pledgeId);if(pledge&&pledge.source==='ÖĞRENCİ')return '';return `<button class="btn tiny secondary" onclick="convertCollectionToDonation('${esc(x.id)}')">Teberruya aktar</button>`}
@@ -308,7 +308,7 @@ function startCollectionBulkEdit(){if(!isApprover())return;state.collectionBulkE
 function collectionBulkDraftCount(){return Object.keys((state.collectionBulkEdit&&state.collectionBulkEdit.drafts)||{}).filter(id=>Object.keys(state.collectionBulkEdit.drafts[id]||{}).length).length}
 function setCollectionBulkValue(id,key,value){const mode=state.collectionBulkEdit;if(!mode||!mode.active||mode.saving)return;mode.drafts[id]=mode.drafts[id]||{};mode.drafts[id][key]=value;const badge=$('#collectionBulkEditCount');if(badge)badge.textContent=collectionBulkDraftCount()+' kayıt değişti'}
 function cancelCollectionBulkEdit(){const count=collectionBulkDraftCount();if(count&&!confirm(`${count} kayıttaki kaydedilmemiş değişiklik iptal edilsin mi?`))return;state.collectionBulkEdit={active:false,saving:false,drafts:{}};renderCollections()}
-function collectionBulkCurrentValue(x,a,key){const d=(state.collectionBulkEdit.drafts||{})[x.id]||{};if(Object.prototype.hasOwnProperty.call(d,key))return d[key];const values={activity:a.activity,fullName:a.fullName,payer:a.payer,phone:a.phone,reference:a.reference,donationType:a.donationType,group:a.group,note:x.note||'',date:x.date||'',receiptNo:x.receiptNo||'',amount:x.amount,method:x.method||'',accountId:x.accountId||''};return values[key]==null?'':values[key]}
+function collectionBulkCurrentValue(x,a,key){const d=(state.collectionBulkEdit.drafts||{})[x.id]||{};if(Object.prototype.hasOwnProperty.call(d,key))return d[key];const values={activity:a.activity,fullName:a.fullName,payer:a.payer,phone:a.phone,reference:a.reference,donationType:a.donationType,referenceType:a.donationType,group:a.group,note:x.note||'',date:x.date||'',receiptNo:x.receiptNo||'',amount:x.amount,method:x.method||'',accountId:x.accountId||''};return values[key]==null?'':values[key]}
 function collectionBulkInput(x,a,key,type='text'){
   const value=collectionBulkCurrentValue(x,a,key);const disabled=state.collectionBulkEdit.saving?' disabled':'';const common=`data-bulk-id="${esc(x.id)}" data-bulk-key="${esc(key)}"${disabled}`;
   if(key==='method'){const values=[...new Set([...(state.data.methods||[]),String(value||'')].filter(Boolean))];return `<select class="bulk-cell-input" ${common} onchange="setCollectionBulkValue('${esc(x.id)}','method',this.value)">${values.map(v=>`<option value="${esc(v)}" ${v===value?'selected':''}>${esc(v)}</option>`).join('')}</select>`}
@@ -317,7 +317,7 @@ function collectionBulkInput(x,a,key,type='text'){
 }
 function collectionBulkCell(column,x,a){
   const editable={activity:['activity','text'],fullName:['fullName','text'],payer:['payer','text'],phone:['phone','text'],reference:['reference','text'],donationType:['donationType','text'],group:['group','text'],notes:['note','text'],date:['date','date'],receiptNo:['receiptNo','text'],paid:['amount','number'],method:['method','select'],accountName:['accountId','select']};
-  const config=editable[column.key];if(config)return collectionBulkInput(x,a,config[0],config[1]);
+  const config=x.direct&&column.key==='donationType'?['referenceType','text']:editable[column.key];if(config)return collectionBulkInput(x,a,config[0],config[1]);
   return `<span class="bulk-cell-locked" title="Bu alan sistem tarafından hesaplanır veya bağlı taahhütten gelir">${column.cell(x,a)}</span>`;
 }
 function saveCollectionBulkEdit(){
@@ -462,7 +462,8 @@ function renderReferences(){
     const rows=[...(state.data.referenceAnalysis||[])].sort((a,b)=>b.period-a.period).map(x=>`<tr><td>${esc(x.name)}</td><td>${x.count}</td><td class="money">${money(x.pledged)}</td><td class="money">${money(x.periodPledged)}</td><td class="money">${money(x.collected)}</td><td class="money">${money(x.period)}</td><td class="money">${money(x.remaining)}</td><td>${(x.rate*100).toFixed(1)}%</td></tr>`);
     $('#content').innerHTML=panel('Referans bazlı tahsilat listesi',tabs+table(['Referans','Taahhüt Sayısı','Tüm Zaman Temin','Dönem Temin','Tüm Zaman Tahsilat','Dönem Tahsilat','Kalan','Tahsilat / Temin'],rows,'Referanslı tahsilat bulunamadı.'),'','Yalnız taahhüde bağlı tahsilatlar gösterilir. Dönem tahsilatına göre büyükten küçüğe sıralanır.');return;
   }
-  const targetData=state.data.referenceTargets||{items:[],summary:{}};
+  const includeParentDonations=state.targetIncludeParentDonations!==false;
+  const targetData=(includeParentDonations?state.data.referenceTargets:state.data.referenceTargetsWithoutParents)||{items:[],summary:{}};
   const typedTargets=(targetData.items||[]);
   const periodKeys=[...new Set(typedTargets.map(x=>x.periodKey||String(x.start||'').slice(0,7)).filter(Boolean))].sort().reverse();
   if(state.targetPeriod===null)state.targetPeriod=periodKeys.includes(currentMonthValue())?currentMonthValue():'';
@@ -476,15 +477,17 @@ function renderReferences(){
   const rows=items.map(x=>`<tr><td>${esc(x.reference)}</td><td>${date(x.start)} - ${date(x.end)}</td><td class="money">${money(x.pledgeTarget)}</td><td class="money">${money(x.actualPledged)}</td><td>${(x.pledgeRate*100).toFixed(1)}%</td><td class="money">${money(x.collectionTarget)}</td><td class="money">${money(x.actualCollected)}</td><td class="money"><strong>${money(Number(x.actualPledged)+Number(x.actualCollected))}</strong></td><td>${(x.collectionRate*100).toFixed(1)}%</td><td><div class="target-status-cell"><span class="status ${achievementClass(x)}">${esc(x.achievementStatus||'')}</span><small>${esc(achievementDetail(x))}</small></div></td><td><span class="status ${x.active?'green':'red'}">${x.active?'Aktif':'Pasif'}</span></td>${actions(x)}</tr>`);
   const periodOptions=periodKeys.map(v=>`<option value="${esc(v)}" ${state.targetPeriod===v?'selected':''}>${esc(staffMonthLabel(v))}</option>`).join('');
   const sort=`<div class="target-toolbar"><label>Hedef dönemi<select id="targetPeriod" onchange="setTargetPeriod(this.value)"><option value="">Tüm dönemler</option>${periodOptions}</select></label><label>Sıralama<select id="targetSort" onchange="setTargetSort(this.value)"><option value="collection-rate" ${state.targetSort==='collection-rate'?'selected':''}>Tahsilat yüzdesi</option><option value="pledge-rate" ${state.targetSort==='pledge-rate'?'selected':''}>Teberru yüzdesi</option><option value="combined-actual" ${state.targetSort==='combined-actual'?'selected':''}>Teberru + tahsilat toplamı</option><option value="collection-actual" ${state.targetSort==='collection-actual'?'selected':''}>Tahsilat toplamı</option><option value="pledge-actual" ${state.targetSort==='pledge-actual'?'selected':''}>Teberru toplamı</option><option value="collection-target" ${state.targetSort==='collection-target'?'selected':''}>Tahsilat hedefi</option><option value="pledge-target" ${state.targetSort==='pledge-target'?'selected':''}>Teberru hedefi</option><option value="name" ${state.targetSort==='name'?'selected':''}>Referans A-Z</option></select></label><button class="btn secondary" onclick="downloadReferenceTargetsPdf()">PDF indir</button></div>`;
+  const parentDonationToggle=state.data.referenceTargetsWithoutParents?`<button type="button" class="btn secondary" onclick="toggleTargetParentDonations()">Veli teberrusunu ${includeParentDonations?'çıkar':'ekle'}</button>`:'';
   const headers=['Referans','Dönem','Teberru Hedefi','Teberru','Teberru %','Tahsilat Hedefi','Tahsilat','Teberru + Tahsilat','Tahsilat %','Hedef Durumu','Kayıt'];if(admin)headers.push('İşlem');
   const active=visibleTargets.filter(x=>x.active);const s=active.reduce((a,x)=>{a.pledgeTarget+=Number(x.pledgeTarget)||0;a.actualPledged+=Number(x.actualPledged)||0;a.collectionTarget+=Number(x.collectionTarget)||0;a.actualCollected+=Number(x.actualCollected)||0;return a},{pledgeTarget:0,actualPledged:0,collectionTarget:0,actualCollected:0});s.totalTarget=s.pledgeTarget+s.collectionTarget;s.totalActual=s.actualPledged+s.actualCollected;s.totalRate=s.totalTarget?s.totalActual/s.totalTarget:0;
   const summary=cards([['Teberru hedefi',money(s.pledgeTarget)],['Gerçekleşen teberru',money(s.actualPledged)],['Tahsilat hedefi',money(s.collectionTarget)],['Toplam tahsilat',money(s.actualCollected)],['Toplam hedef',money(s.totalTarget)],['Teberru + tahsilat',money(s.totalActual)],['Genel gerçekleşme','%'+(s.totalRate*100).toFixed(1)]]);
   const targetActions=admin?'<div class="actions"><button class="btn secondary" onclick="bulkReferenceTargetModal()">Toplu hedef ver</button><button class="btn secondary" onclick="copyReferenceTargetsModal()">Ayı devret</button><button class="btn primary" onclick="referenceTargetModal()">Yeni hedef</button></div>':'';
-  $('#content').innerHTML=summary+panel('Teberru ve tahsilat hedefleri',tabs+sort+table(headers,rows,state.targetPeriod?'Bu hedef döneminde kayıt bulunamadı.':'Henüz hedef tanımlanmadı.'),targetActions);
+  $('#content').innerHTML=summary+panel('Teberru ve tahsilat hedefleri',tabs+sort+parentDonationToggle+table(headers,rows,state.targetPeriod?'Bu hedef döneminde kayıt bulunamadı.':'Henüz hedef tanımlanmadı.'),targetActions);
 }
 function setReferenceTab(tab){state.referenceTab=tab;renderReferences()}
 function setReferenceSource(source){state.referenceSource=source;state.targetPeriod=null;state.targetSort='collection-rate';renderReferences()}
 function setTargetSort(sort){state.targetSort=sort;renderReferences()}
+function toggleTargetParentDonations(){state.targetIncludeParentDonations=state.targetIncludeParentDonations===false;renderReferences()}
 function setTargetPeriod(period){state.targetPeriod=period;renderReferences()}
 function referenceTargetFields(x={}){
   const refs=(state.data.referenceNames||[]).slice();if(x.reference&&!refs.includes(x.reference))refs.unshift(x.reference);
@@ -512,7 +515,7 @@ async function submitReferenceTarget(){await submit('saveReferenceTarget',refere
 async function submitReferenceTargetEdit(id){await submit('updateReferenceTarget',referenceTargetPayload(id))}
 async function toggleReferenceTarget(id,active){if(!confirm(active?'Hedef aktif yapılsın mı?':'Hedef pasif yapılsın mı?'))return;await submit('setReferenceTargetActive',id,active)}
 async function removeReferenceTarget(id){if(!confirm('Bu referans hedefi silinsin mi?'))return;await submit('deleteReferenceTarget',id)}
-async function downloadReferenceTargetsPdf(){setBusy(true);try{const r=await server('generateReferenceTargetsPdf',state.token,state.targetSort,state.targetPeriod,referenceTargetType());downloadBase64File(r);toast('Teberru ve tahsilat hedef raporu indirildi.')}catch(e){toast(e.message,true)}finally{setBusy(false)}}
+async function downloadReferenceTargetsPdf(){setBusy(true);try{const r=await server('generateReferenceTargetsPdf',state.token,state.targetSort,state.targetPeriod,referenceTargetType(),state.targetIncludeParentDonations!==false);downloadBase64File(r);toast('Teberru ve tahsilat hedef raporu indirildi.')}catch(e){toast(e.message,true)}finally{setBusy(false)}}
 function downloadBase64File(r){const bytes=Uint8Array.from(atob(r.base64),c=>c.charCodeAt(0));const blob=new Blob([bytes],{type:r.mimeType});const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=r.fileName;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1500)}
 function renderCash(){
   heading('Kasa / Banka','Gelirler, personel ve öğretmen ödemeleri, cari ödemeler ve fiş giderlerinin net bakiyesi');
@@ -856,7 +859,7 @@ function filterSearchPicker(prefix){
   items.forEach(el=>{const match=q.length>=2&&el.dataset.search.includes(q)&&shown<100;el.classList.toggle('hidden',!match);if(match)shown++;});
   $('#'+prefix+'Status').textContent=q.length<2?'Sonuçları görmek için en az 2 karakter yazın.':(shown?shown+' eşleşme bulundu. Seçmek için kayda tıklayın.':'Eşleşen kayıt bulunamadı.');
 }
-function selectSearchPicker(prefix,id,el){$('#'+prefix+'Selected').value=id;document.querySelectorAll('#'+prefix+'List .picker-item').forEach(x=>x.classList.remove('selected'));el.classList.add('selected');$('#'+prefix+'Status').textContent='Kayıt seçildi.'}
+function selectSearchPicker(prefix,id,el){$('#'+prefix+'Selected').value=id;document.querySelectorAll('#'+prefix+'List .picker-item').forEach(x=>x.classList.remove('selected'));el.classList.add('selected');$('#'+prefix+'Status').textContent='Kayıt seçildi.';if(prefix==='pledgePicker')fillLinkedCollectionReference(id)}
 function bulkPickerHtml(prefix,items,labelFn){return `<div class="wide bulk-picker"><div class="bulk-picker-tools"><label>Arama<input id="${prefix}Search" type="search" placeholder="İsim, tür, dönem, referans..." oninput="filterBulkPicker('${prefix}')" autocomplete="off"></label><div class="actions"><button class="btn tiny secondary" type="button" onclick="selectVisibleBulkItems('${prefix}',true)">Görünenleri seç</button><button class="btn tiny" type="button" onclick="selectVisibleBulkItems('${prefix}',false)">Seçimi temizle</button></div></div><div id="${prefix}Status" class="picker-status">İlk ${Math.min(100,items.length)} kayıt gösteriliyor. Arayarak farklı kayıtları seçebilirsiniz.</div><div id="${prefix}List" class="bulk-picker-list">${items.map((x,i)=>`<div class="bulk-picker-item ${i<100?'':'hidden'}" data-id="${esc(x.id)}" data-search="${esc(normalizeSearch(Object.values(x).join(' ')))}"><input class="bulk-check" type="checkbox" aria-label="Kaydı seç" onchange="toggleBulkItem('${prefix}',this)"><button type="button" class="bulk-picker-copy" onclick="toggleBulkItemFromLabel('${prefix}',this)">${labelFn(x)}</button><label>Tutar<input class="bulk-amount" type="number" min="0.01" max="${Number(x.remaining)||0}" step="0.01" value="${Number(x.remaining)||0}" disabled oninput="updateBulkPickerTotal('${prefix}')"></label></div>`).join('')}</div><div class="bulk-picker-summary"><strong id="${prefix}Count">0 kayıt seçildi</strong><span id="${prefix}Total">${money(0)}</span></div></div>`}
 function filterBulkPicker(prefix){const q=normalizeSearch($('#'+prefix+'Search').value);const rows=[...document.querySelectorAll('#'+prefix+'List .bulk-picker-item')];let shown=0;rows.forEach(row=>{const checked=row.querySelector('.bulk-check').checked;const match=(q.length<2?shown<100:row.dataset.search.includes(q)&&shown<200)||checked;row.classList.toggle('hidden',!match);if(match&&!checked)shown++});$('#'+prefix+'Status').textContent=q.length<2?`İlk ${Math.min(100,shown)} kayıt gösteriliyor.`:(shown?shown+' eşleşme gösteriliyor.':'Eşleşen yeni kayıt yok; seçilmiş kayıtlar görünmeye devam eder.')}
 function toggleBulkItem(prefix,checkbox){const row=checkbox.closest('.bulk-picker-item');row.classList.toggle('selected',checkbox.checked);row.querySelector('.bulk-amount').disabled=!checkbox.checked;updateBulkPickerTotal(prefix)}
@@ -1082,7 +1085,7 @@ function collectionModal(preselectedId=''){
   const selected=open.find(x=>x.id===preselectedId);
   const picker=selected?`<div class="wide selected-pledge-summary"><strong>${esc(selected.fullName)}</strong><span>${esc(selected.donationType)} · ${esc(selected.reference)} · Kalan: ${money(selected.remaining)}</span><input id="pledgePickerSelected" type="hidden" value="${esc(selected.id)}"></div>`:searchPickerHtml('pledgePicker',open,x=>`<strong>${esc(x.fullName)}</strong><span>${esc(x.donationType)} · ${esc(x.reference)} · ${esc(x.personnel||'Personel yok')}</span><span>Kalan: ${money(x.remaining)} · ${esc(x.phone||'Numara yok')}</span>`);
   const accounts=collectionAccountOptions();
-  showModal('Tahsilat ekle',formHtml(picker+selectValueField('Kasa / Banka hesabı','fAccount',accounts)+inputField('TL karşılığı','fAmount','number',false,'min="0.01" step="0.01" required')+collectionFxFields()+inputField('Tarih','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}" required`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+inputField('Açıklama','fNote','text',true),'submitCollection()'));bindCollectionFxFields();
+  showModal('Tahsilat ekle',formHtml(picker+linkedCollectionReferenceFields()+selectValueField('Kasa / Banka hesabı','fAccount',accounts)+inputField('TL karşılığı','fAmount','number',false,'min="0.01" step="0.01" required')+collectionFxFields()+inputField('Tarih','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}" required`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+inputField('Açıklama','fNote','text',true),'submitCollection()'));bindCollectionFxFields();fillLinkedCollectionReference(selected?.id);
 }
 function studentCollectionModal(preselectedId=''){
   const open=(state.data.students?.accruals||[]).filter(x=>x.remaining>0&&x.receivableStatus!=='ŞÜPHELİ');
@@ -1090,7 +1093,7 @@ function studentCollectionModal(preselectedId=''){
   const selected=open.find(x=>x.id===preselectedId);
   const picker=selected?`<div class="wide selected-pledge-summary"><strong>${esc(selected.fullName)}</strong><span>${esc(selected.donationType)} · ${esc(selected.payer||'Veli bilgisi yok')} · Kalan: ${money(selected.remaining)}</span><input id="pledgePickerSelected" type="hidden" value="${esc(selected.id)}"></div>`:searchPickerHtml('pledgePicker',open,x=>`<strong>${esc(x.fullName)}</strong><span>${esc(x.donationType)} · ${esc(x.payer||'Veli bilgisi yok')}</span><span>Kalan: ${money(x.remaining)} · ${esc(x.phone||'Numara yok')}</span>`);
   const accounts=collectionAccountOptions();
-  showModal('Öğrenci tahsilatı ekle',formHtml(picker+selectValueField('Gelirin gireceği kasa / banka','fAccount',accounts)+inputField('TL karşılığı','fAmount','number',false,'min="0.01" step="0.01" required')+collectionFxFields()+inputField('Tarih','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}" required`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+inputField('Açıklama','fNote','text',true),'submitCollection()'));bindCollectionFxFields();
+  showModal('Öğrenci tahsilatı ekle',formHtml(picker+linkedCollectionReferenceFields()+selectValueField('Gelirin gireceği kasa / banka','fAccount',accounts)+inputField('TL karşılığı','fAmount','number',false,'min="0.01" step="0.01" required')+collectionFxFields()+inputField('Tarih','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}" required`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+inputField('Açıklama','fNote','text',true),'submitCollection()'));bindCollectionFxFields();fillLinkedCollectionReference(selected?.id);
 }
 function bulkCollectionModal(){
   const open=state.data.pledges.filter(x=>x.remaining>0&&x.receivableStatus!=='ŞÜPHELİ').sort((a,b)=>a.fullName.localeCompare(b.fullName,'tr'));
@@ -1104,19 +1107,84 @@ async function submitBulkCollections(){
   try{const items=collectBulkPickerItems('bulkCollection','pledgeId');const total=items.reduce((s,x)=>s+(Number(x.amount)||0),0);if(!confirm(`${items.length} tahsilat, toplam ${money(total)} olarak kaydedilsin mi?`))return;payload={items:items,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value}}catch(e){toast(e.message,true);return;}
   setBusy(true);try{const r=await server('saveBulkCollections',state.token,payload);if($('#modal').open)$('#modal').close();toast(r.approvalStatus==='BEKLİYOR'?`${r.count} tahsilat onaya gönderildi: ${money(r.total)}.`:`${r.count} tahsilat onaylı kaydedildi: ${money(r.total)}.`);scheduleDataSync()}catch(e){toast(e.message,true)}finally{setBusy(false)}
 }
+function referenceSuggestions(name, reference) {
+  const history=state.data.referenceHistory||[];
+  const key=normalizeSearch(reference);
+  const sameName=normalizeSearch(name)?history.filter(item=>normalizeSearch(item.name)===normalizeSearch(name)):[];
+  const matching=key?history.filter(item=>normalizeSearch(item.reference)===key):[];
+  const namedMatches=sameName.filter(item=>normalizeSearch(item.reference)===key);
+  const options=(items,field)=>[...new Map(items.filter(item=>item[field]).map(item=>[normalizeSearch(item[field]),item[field]])).values()];
+  return {
+    references:options(sameName,'reference'),
+    types:options(namedMatches.length?namedMatches:matching,'referenceType'),
+    groups:options(namedMatches.length?namedMatches:matching,'group')
+  };
+}
+function bindDonationSuggestions(){
+  const name=$('#fName'), reference=$('#fReference'), type=$('#fRefNev'), group=$('#fGroup');
+  const fields=[reference,type,group];
+  const automatic=new Map();
+  const edited=new Set(fields.filter(field=>field.value&&field.tagName!=='SELECT'));
+  if(type.value)edited.add(type);
+  fields.forEach(field=>field.addEventListener('input',()=>{edited.add(field);automatic.delete(field);}));
+  function suggest(field,values){
+    if(edited.has(field))return;
+    if(!field.value||field.value===automatic.get(field)){
+      field.value=values.length===1?values[0]:'';
+      automatic.set(field,field.value);
+    }
+  }
+  function refresh(){
+    let suggestions=referenceSuggestions(name.value,reference.value);
+    const referenceList=$('#fReferenceSuggestions');
+    if(referenceList){
+      const refs=[...new Set([...suggestions.references,...(state.data.referenceNames||[]),reference.value].filter(Boolean))];
+      referenceList.replaceChildren(...refs.map(value=>new Option(value,value)));
+      suggest(reference,suggestions.references);
+    }else if(reference.tagName==='SELECT'&&!edited.has(reference)){
+      const matches=[...reference.options].filter(option=>suggestions.references.some(value=>normalizeSearch(value)===normalizeSearch(option.value)));
+      if(matches.length===1)reference.value=matches[0].value;
+    }
+    suggestions=referenceSuggestions(name.value,reference.value);
+    $('#fGroupSuggestions').replaceChildren(...suggestions.groups.map(value=>new Option(value,value)));
+    const selected=type.value;
+    const types=[...new Set([...PLEDGE_REFERENCE_TYPES,...suggestions.types,selected].filter(Boolean))];
+    type.replaceChildren(new Option('',''),...types.map(value=>new Option(value,value)));
+    type.value=selected;
+    suggest(type,suggestions.types);
+    suggest(group,suggestions.groups);
+  }
+  name.addEventListener('input',refresh);
+  reference.addEventListener('input',refresh);
+  refresh();
+}
+function linkedCollectionReferenceFields(){
+  return inputField('Referans','linkedReference','text',false,'readonly')+
+    inputField('Referans Nevi','linkedReferenceType','text',false,'readonly')+
+    suggestField('Takip Eden','linkedGroup',[]);
+}
+function fillLinkedCollectionReference(id){
+  if(!$('#linkedReference'))return;
+  const pledge=(state.data.pledges||[]).find(item=>item.id===id);
+  const suggestions=referenceSuggestions(pledge?.fullName,pledge?.reference);
+  $('#linkedReference').value=pledge?.reference||'';
+  $('#linkedReferenceType').value=pledge?.donationType||'';
+  $('#linkedGroupSuggestions').replaceChildren(...suggestions.groups.map(value=>new Option(value,value)));
+  $('#linkedGroup').value=pledge?.group||(suggestions.groups.length===1?suggestions.groups[0]:'');
+}
 function quickDonationModal(){
   const approver=isApprover();
   const refs=(state.data.referenceNames||[]).slice();
   const referenceField=approver?suggestField('Referans','fReference',refs):operationReferenceField();
   const accounts=collectionAccountOptions();
   const refNevField=selectField('Referans Nevi','fRefNev',[''].concat(PLEDGE_REFERENCE_TYPES));
-  const fields=selectField('Bağış türü','fType',state.data.donationTypes)+inputField('Bağışçı / Hesap adı','fName','text',false,'required')+inputField('Ödeyen','fPayer')+referenceField+refNevField+selectValueField('Gelirin gireceği kasa / banka','fAccount',accounts)+inputField('TL karşılığı','fAmount','number',false,'min="0.01" step="0.01" required')+collectionFxFields()+inputField('Tarih','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}" required`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+inputField('Açıklama','fNote','text',true);
-  showModal('Teberru ekle',formHtml(fields,'submitQuickDonation()'));bindCollectionFxFields();
+  const fields=selectField('Bağış türü','fType',state.data.donationTypes)+inputField('Bağışçı / Hesap adı','fName','text',false,'required')+inputField('Ödeyen','fPayer')+referenceField+refNevField+suggestField('Takip Eden','fGroup',[])+selectValueField('Gelirin gireceği kasa / banka','fAccount',accounts)+inputField('TL karşılığı','fAmount','number',false,'min="0.01" step="0.01" required')+collectionFxFields()+inputField('Tarih','fDate','date',false,`value="${new Date().toISOString().slice(0,10)}" required`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+inputField('Açıklama','fNote','text',true);
+  showModal('Teberru ekle',formHtml(fields,'submitQuickDonation()'));bindCollectionFxFields();bindDonationSuggestions();
 }
-async function submitQuickDonation(){const required=['fType','fName','fReference','fAmount','fDate','fMethod','fAccount'];if(!validateModalFields(required))return;await submit('saveQuickDonation',Object.assign({donationType:$('#fType').value,fullName:$('#fName').value,payer:$('#fPayer').value,reference:$('#fReference')?.value||'',referenceType:$('#fRefNev')?.value||'',amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value},collectionFxPayload()))}
-async function submitCollection(){const id=$('#pledgePickerSelected').value;if(!id){toast('Arama sonucundan bir taahhüt seçin.',true);return;}if(!validateModalFields(['fAmount','fDate','fMethod','fAccount']))return;await submit('saveCollection',Object.assign({pledgeId:id,amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value},collectionFxPayload()))}
-function editCollectionModal(id){const x=state.data.collections.find(r=>r.id===id);if(!x)return;const accounts=(state.data.cash?.accounts||[]).map(a=>({value:a.id,label:a.name}));let directFields='';if(x.direct){const refs=(state.data.referenceNames||[]).slice();if(!refs.includes(x.reference))refs.unshift(x.reference);directFields=selectField('Bağış türü','fType',state.data.donationTypes.includes(x.donationType)?state.data.donationTypes:[x.donationType,...state.data.donationTypes])+inputField('Bağışçı / Hesap adı','fName','text',false,`value="${esc(x.fullName)}" required`)+inputField('Ödeyen','fPayer','text',false,`value="${esc(x.payer||'')}"`)+suggestField('Referans','fReference',refs,x.reference)+selectField('Referans Nevi','fRefNev',[''].concat(PLEDGE_REFERENCE_TYPES));}showModal(x.direct?'Teberruyu düzelt':'Tahsilatı düzelt',formHtml(directFields+selectValueField('Kasa / Banka hesabı','fAccount',accounts)+inputField('TL karşılığı','fAmount','number',false,`min="0.01" step="0.01" value="${x.amount}" required`)+collectionFxFields(x)+inputField('Tarih','fDate','date',false,`value="${x.date}" required`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+inputField('Açıklama','fNote','text',true,`value="${esc(x.note||'')}"`),`submitCollectionEdit('${esc(id)}')`));if(x.direct){$('#fType').value=x.donationType;if($('#fRefNev'))$('#fRefNev').value=x.referenceType||'';}$('#fMethod').value=x.method;$('#fAccount').value=x.accountId;bindCollectionFxFields(x)}
-async function submitCollectionEdit(id){const required=['fAmount','fDate','fMethod','fAccount'];if($('#fName'))required.push('fName','fReference','fType');if(!validateModalFields(required))return;await submit('updateCollection',Object.assign({id,donationType:$('#fType')?.value||'',fullName:$('#fName')?.value||'',payer:$('#fPayer')?.value||'',reference:$('#fReference')?.value||'',referenceType:$('#fRefNev')?.value||'',amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value},collectionFxPayload()))}
+async function submitQuickDonation(){const required=['fType','fName','fReference','fAmount','fDate','fMethod','fAccount'];if(!validateModalFields(required))return;await submit('saveQuickDonation',Object.assign({donationType:$('#fType').value,fullName:$('#fName').value,payer:$('#fPayer').value,reference:$('#fReference')?.value||'',referenceType:$('#fRefNev')?.value||'',group:$('#fGroup').value,amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value},collectionFxPayload()))}
+async function submitCollection(){const id=$('#pledgePickerSelected').value;if(!id){toast('Arama sonucundan bir taahhüt seçin.',true);return;}if(!validateModalFields(['fAmount','fDate','fMethod','fAccount']))return;await submit('saveCollection',Object.assign({pledgeId:id,group:$('#linkedGroup')?.value,amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value},collectionFxPayload()))}
+function editCollectionModal(id){const x=state.data.collections.find(r=>r.id===id);if(!x)return;const accounts=(state.data.cash?.accounts||[]).map(a=>({value:a.id,label:a.name}));let directFields='';if(x.direct){const refs=(state.data.referenceNames||[]).slice();if(!refs.includes(x.reference))refs.unshift(x.reference);directFields=selectField('Bağış türü','fType',state.data.donationTypes.includes(x.donationType)?state.data.donationTypes:[x.donationType,...state.data.donationTypes])+inputField('Bağışçı / Hesap adı','fName','text',false,`value="${esc(x.fullName)}" required`)+inputField('Ödeyen','fPayer','text',false,`value="${esc(x.payer||'')}"`)+suggestField('Referans','fReference',refs,x.reference)+selectField('Referans Nevi','fRefNev',['',...new Set([...PLEDGE_REFERENCE_TYPES,x.referenceType].filter(Boolean))])+suggestField('Takip Eden','fGroup',[],x.group||'');}showModal(x.direct?'Teberruyu düzelt':'Tahsilatı düzelt',formHtml(directFields+selectValueField('Kasa / Banka hesabı','fAccount',accounts)+inputField('TL karşılığı','fAmount','number',false,`min="0.01" step="0.01" value="${x.amount}" required`)+collectionFxFields(x)+inputField('Tarih','fDate','date',false,`value="${x.date}" required`)+selectField('Ödeme yöntemi','fMethod',state.data.methods)+inputField('Açıklama','fNote','text',true,`value="${esc(x.note||'')}"`),`submitCollectionEdit('${esc(id)}')`));if(x.direct){$('#fType').value=x.donationType;if($('#fRefNev'))$('#fRefNev').value=x.referenceType||'';bindDonationSuggestions();}$('#fMethod').value=x.method;$('#fAccount').value=x.accountId;bindCollectionFxFields(x)}
+async function submitCollectionEdit(id){const required=['fAmount','fDate','fMethod','fAccount'];if($('#fName'))required.push('fName','fReference','fType');if(!validateModalFields(required))return;await submit('updateCollection',Object.assign({id,donationType:$('#fType')?.value||'',fullName:$('#fName')?.value||'',payer:$('#fPayer')?.value||'',reference:$('#fReference')?.value||'',referenceType:$('#fRefNev')?.value,group:$('#fGroup')?.value,amount:$('#fAmount').value,date:$('#fDate').value,method:$('#fMethod').value,accountId:$('#fAccount').value,note:$('#fNote').value},collectionFxPayload()))}
 async function removeCollection(id){if(!confirm('Bu tahsilat silinsin mi? İlgili taahhüdün bakiyesi otomatik düzeltilecek.'))return;await submit('deleteCollection',id)}
 function expenseCommitmentModal(kind){
   if(kind==='teacher'){
