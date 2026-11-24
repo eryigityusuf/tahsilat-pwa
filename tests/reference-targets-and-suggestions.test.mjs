@@ -12,7 +12,7 @@ const context = vm.createContext({
   inRange_: (date, start, end) => date >= start && date <= end,
   cleanText_: (value, length) => String(value ?? '').trim().slice(0, length),
 });
-const serverFunctions = ['referenceTargetData_', 'referenceTargetType_', 'referenceKey_', 'normalizeKey_', 'isStudentPledgeRow_',
+const serverFunctions = ['referenceTargetData_', 'referenceTargetType_', 'referenceKey_', 'personName_', 'normalizeKey_', 'isStudentPledgeRow_',
   'collectionApprovalStatus_', 'isCollectionApprovedRow_', 'collectionReferenceType_', 'groupReferenceTypes_', 'referenceHistory_'];
 for (const name of serverFunctions) {
   const start = source.indexOf('function ' + name + '(');
@@ -65,6 +65,6 @@ vm.runInContext(client.split('\n').find(line => line.startsWith('function normal
   '\n' + client.slice(client.indexOf('function referenceSuggestions('), client.indexOf('function bindDonationSuggestions(')), ui);
 const suggestions = ui.referenceSuggestions('deniz', 'ışık');
 assert.equal(suggestions.references.length, 1);
-assert.equal(suggestions.groups[0], 'Ayşe');
+assert.equal(suggestions.groups[0], 'AYŞE');
 assert.equal(suggestions.types.length, 2);
 assert.equal(ui.referenceSuggestions('başka biri', 'bilinmeyen').types.length, 0);

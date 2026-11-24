@@ -2981,7 +2981,7 @@ function userReferences_(value) {
   const source = Array.isArray(value) ? value : String(value || '').split(/[\n;|]+/);
   const result = [], seen = {};
   source.forEach(function(item) {
-    const name = cleanText_(item, 100);
+    const name = personName_(item);
     const key = referenceKey_(name);
     if (name && !seen[key]) { seen[key] = true; result.push(name); }
   });
@@ -3520,7 +3520,7 @@ function referenceHistory_(pledges, collections) {
   function add(name, reference, referenceType, group) {
     if (!referenceKey_(reference)) return;
     const key = [name, reference, referenceType, group].map(referenceKey_).join('|');
-    if (!entries.has(key)) entries.set(key, {name:name, reference:reference, referenceType:referenceType, group:group});
+    if (!entries.has(key)) entries.set(key, {name:personName_(name), reference:personName_(reference), referenceType:referenceType, group:personName_(group)});
   }
   pledges.forEach(function(row) { add(row[3], row[6], row[2], row[20]); });
   collections.forEach(function(row) {
@@ -3531,7 +3531,7 @@ function referenceHistory_(pledges, collections) {
 
 function groupReferences_(pledges, collections, periodCollections, periodPledges) {
   const map = {};
-  function item_(value) { const name=cleanText_(value,120)||'Referanssız'; const key=referenceKey_(name)||'referanssiz'; return map[key]||(map[key]={name:name,count:0,pledged:0,collected:0,period:0,periodPledged:0}); }
+  function item_(value) { const name=personName_(value)||'REFERANSSIZ'; const key=referenceKey_(name)||'referanssiz'; return map[key]||(map[key]={name:name,count:0,pledged:0,collected:0,period:0,periodPledged:0}); }
   pledges.forEach(r => { const x=item_(r[6]); x.count++; x.pledged+=Number(r[7]||0); });
   collections.forEach(r => { const x=item_(r[5]); x.collected+=Number(r[7]||0); });
   periodCollections.forEach(r => { const x=item_(r[5]); x.period+=Number(r[7]||0); });
@@ -3542,7 +3542,7 @@ function groupReferences_(pledges, collections, periodCollections, periodPledges
 function groupDonationReferences_(collections, periodCollections) {
   const map = {};
   function item_(value) {
-    const name = cleanText_(value, 120) || 'Referanssız';
+    const name = personName_(value) || 'REFERANSSIZ';
     const key = referenceKey_(name) || 'referanssiz';
     return map[key] || (map[key] = { name:name, count:0, collected:0, period:0 });
   }
@@ -3596,8 +3596,8 @@ function expenseRemainingItems_(commitments) {
   }).sort(function(a, b) { return b.remaining - a.remaining; });
 }
 
-function pledgeDto_(r) { return { id:r[0], year:r[1], donationType:r[2], fullName:r[3], phone:r[4], payer:r[5], reference:r[6], amount:n_(r[7]), paid:n_(r[8]), remaining:n_(r[9]), status:r[10], pledgeDate:isoDate_(r[11]), personnel:r[14]||'', receivableStatus:String(r[15]||'AKTİF').toUpperCase(), source:String(r[16]||'BAĞIŞ').toUpperCase(), activity:r[17]||'', subActivity:r[18]||'', accountCode:r[19]||'', group:r[20]||'', notes:r[21]||'' }; }
-function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:r[3], donationType:r[4], reference:r[5], payer:r[6], amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'', receiptNo:r[18]||'', group:r[19]||'', activity:r[20]||'', phone:r[21]||'', currency:r[22]||'', foreignAmount:n_(r[23]), exchangeRate:n_(r[24]), referenceType:collectionReferenceType_(r) }; }
+function pledgeDto_(r) { return { id:r[0], year:r[1], donationType:r[2], fullName:personName_(r[3]), phone:r[4], payer:personName_(r[5]), reference:personName_(r[6]), amount:n_(r[7]), paid:n_(r[8]), remaining:n_(r[9]), status:r[10], pledgeDate:isoDate_(r[11]), personnel:personName_(r[14]), receivableStatus:String(r[15]||'AKTİF').toUpperCase(), source:String(r[16]||'BAĞIŞ').toUpperCase(), activity:r[17]||'', subActivity:r[18]||'', accountCode:r[19]||'', group:personName_(r[20]), notes:r[21]||'' }; }
+function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:personName_(r[3]), donationType:r[4], reference:personName_(r[5]), payer:personName_(r[6]), amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'', receiptNo:r[18]||'', group:personName_(r[19]), activity:r[20]||'', phone:r[21]||'', currency:r[22]||'', foreignAmount:n_(r[23]), exchangeRate:n_(r[24]), referenceType:collectionReferenceType_(r) }; }
 function collectionRemainingAfterMap_(pledges, collections) {
   const amounts={};(pledges||[]).forEach(function(r){amounts[String(r[0])]=Number(r[7])||0;});
   const indexed=(collections||[]).map(function(r,index){return {row:r,index:index};}).filter(function(x){return Boolean(String(x.row[2]||'').trim());});
@@ -3613,17 +3613,17 @@ function collectionRemainingAfterMap_(pledges, collections) {
   return result;
 }
 function collectionDtoWithBalance_(r, remainingMap) { const dto=collectionDto_(r);dto.remainingAfter=dto.direct?0:(Object.prototype.hasOwnProperty.call(remainingMap||{},String(r[0]))?n_(remainingMap[String(r[0])]):null);return dto; }
-function expenseCommitmentDto_(r, kind) { return { id:r[0], name:r[1], paymentType:r[2], period:r[3], total:n_(r[4]), paid:n_(r[5]), remaining:n_(r[6]), dueDate:isoDate_(r[7]), status:r[8], note:r[9], lessonHours:kind==='teacher'?n_(r[11]):0, hourlyRate:kind==='teacher'?n_(r[12]):0 }; }
-function expensePaymentDto_(r, commitment) { return { id:r[0], date:isoDate_(r[1]), commitmentId:r[2], name:r[3], amount:n_(r[4]), method:r[5], note:r[6], accountId:r[8]||'', accountName:r[9]||'', accrualPeriod:commitment?String(commitment[3]||''):'', paymentType:commitment?String(commitment[2]||''):'' }; }
-function staffPlanDto_(r) { return { id:r[0], name:r[1], paymentType:r[2], amount:n_(r[3]), active:r[4]===true, note:r[5] }; }
-function teacherPlanDto_(r) { return { id:r[0], name:r[1], lessonName:r[2], lessonHours:n_(r[3]), hourlyRate:n_(r[4]), amount:Math.round(n_(r[3])*n_(r[4])*100)/100, active:r[5]===true, note:r[6] }; }
+function expenseCommitmentDto_(r, kind) { return { id:r[0], name:personName_(r[1]), paymentType:r[2], period:r[3], total:n_(r[4]), paid:n_(r[5]), remaining:n_(r[6]), dueDate:isoDate_(r[7]), status:r[8], note:r[9], lessonHours:kind==='teacher'?n_(r[11]):0, hourlyRate:kind==='teacher'?n_(r[12]):0 }; }
+function expensePaymentDto_(r, commitment) { return { id:r[0], date:isoDate_(r[1]), commitmentId:r[2], name:personName_(r[3]), amount:n_(r[4]), method:r[5], note:r[6], accountId:r[8]||'', accountName:r[9]||'', accrualPeriod:commitment?String(commitment[3]||''):'', paymentType:commitment?String(commitment[2]||''):'' }; }
+function staffPlanDto_(r) { return { id:r[0], name:personName_(r[1]), paymentType:r[2], amount:n_(r[3]), active:r[4]===true, note:r[5] }; }
+function teacherPlanDto_(r) { return { id:r[0], name:personName_(r[1]), lessonName:r[2], lessonHours:n_(r[3]), hourlyRate:n_(r[4]), amount:Math.round(n_(r[3])*n_(r[4])*100)/100, active:r[5]===true, note:r[6] }; }
 function userDto_(r) {
   const references=userReferences_(r[4]);
   function loginTime_(value) { return value instanceof Date ? Utilities.formatDate(value,'Europe/Istanbul','dd.MM.yyyy HH:mm') : String(value||''); }
-  return { id:r[0], name:r[1], email:r[2], role:r[3], reference:references[0]||'', references:references, active:r[7]===true, createdAt:isoDate_(r[8]), lastLoginAt:loginTime_(r[9]), lastFailedLoginAt:loginTime_(r[10]), failedLoginCount:Number(r[11])||0, lastLoginStatus:String(r[12]||'HENÜZ GİRİŞ YOK') };
+  return { id:r[0], name:personName_(r[1]), email:r[2], role:r[3], reference:references[0]||'', references:references, active:r[7]===true, createdAt:isoDate_(r[8]), lastLoginAt:loginTime_(r[9]), lastFailedLoginAt:loginTime_(r[10]), failedLoginCount:Number(r[11])||0, lastLoginStatus:String(r[12]||'HENÜZ GİRİŞ YOK') };
 }
-function loanDto_(r) { return {id:r[0],date:isoDate_(r[1]),lender:r[2],amount:n_(r[3]),repaid:n_(r[4]),remaining:n_(r[5]),status:r[6],accountId:r[7],accountName:r[8],note:r[9]}; }
-function loanRepaymentDto_(r) { return {id:r[0],date:isoDate_(r[1]),loanId:r[2],lender:r[3],amount:n_(r[4]),method:r[5],note:r[6],accountId:r[8],accountName:r[9]}; }
+function loanDto_(r) { return {id:r[0],date:isoDate_(r[1]),lender:personName_(r[2]),amount:n_(r[3]),repaid:n_(r[4]),remaining:n_(r[5]),status:r[6],accountId:r[7],accountName:r[8],note:r[9]}; }
+function loanRepaymentDto_(r) { return {id:r[0],date:isoDate_(r[1]),loanId:r[2],lender:personName_(r[3]),amount:n_(r[4]),method:r[5],note:r[6],accountId:r[8],accountName:r[9]}; }
 function accountingImportDto_(r) { return {externalId:r[0],type:r[1],systemId:r[2],date:isoDate_(r[3]),amount:n_(r[4]),user:r[5],importedAt:r[6] instanceof Date?Utilities.formatDate(r[6],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[6]||'')}; }
 function recentAccountingImports_(limit) {
   const sh=getDb_().getSheetByName(APP.sheets.accountingImports);if(!sh)return [];
@@ -3664,7 +3664,7 @@ function referenceTargetData_(session, pledges, collections, includeParentDonati
     const startIso=isoDate_(r[1]),endIso=isoDate_(r[2]);
     const reached=(pledgeTarget<=0||actualPledged>=pledgeTarget)&&(collectionTarget<=0||actualCollected>=collectionTarget);
     const achievementStatus=reached?'Hedefe ulaşıldı':(today<startIso?'Bekliyor':(today>endIso?'Hedef tamamlanmadı':'Devam ediyor'));
-    return {id:r[0],targetType:targetType,start:startIso,end:endIso,periodKey:startIso.slice(0,7),reference:r[3],pledgeTarget:pledgeTarget,collectionTarget:collectionTarget,actualPledged:actualPledged,actualCollected:actualCollected,totalTarget:pledgeTarget+collectionTarget,totalActual:actualPledged+actualCollected,totalRate:(pledgeTarget+collectionTarget)?(actualPledged+actualCollected)/(pledgeTarget+collectionTarget):0,pledgeRate:pledgeTarget?actualPledged/pledgeTarget:0,collectionRate:collectionTarget?actualCollected/collectionTarget:0,pledgeRemaining:Math.max(0,pledgeTarget-actualPledged),collectionRemaining:Math.max(0,collectionTarget-actualCollected),achievementStatus:achievementStatus,active:r[6]===true,note:r[7]};
+    return {id:r[0],targetType:targetType,start:startIso,end:endIso,periodKey:startIso.slice(0,7),reference:personName_(r[3]),pledgeTarget:pledgeTarget,collectionTarget:collectionTarget,actualPledged:actualPledged,actualCollected:actualCollected,totalTarget:pledgeTarget+collectionTarget,totalActual:actualPledged+actualCollected,totalRate:(pledgeTarget+collectionTarget)?(actualPledged+actualCollected)/(pledgeTarget+collectionTarget):0,pledgeRate:pledgeTarget?actualPledged/pledgeTarget:0,collectionRate:collectionTarget?actualCollected/collectionTarget:0,pledgeRemaining:Math.max(0,pledgeTarget-actualPledged),collectionRemaining:Math.max(0,collectionTarget-actualCollected),achievementStatus:achievementStatus,active:r[6]===true,note:r[7]};
   });
   const activeItems=items.filter(function(x){return x.active;});
   const summary={pledgeTarget:activeItems.reduce(function(s,x){return s+x.pledgeTarget;},0),actualPledged:activeItems.reduce(function(s,x){return s+x.actualPledged;},0),collectionTarget:activeItems.reduce(function(s,x){return s+x.collectionTarget;},0),actualCollected:activeItems.reduce(function(s,x){return s+x.actualCollected;},0)};
@@ -3886,11 +3886,11 @@ function uniqueStaffNames_() {
   const map = {};
   optionalDataRows_(APP.sheets.staffPlans).forEach(function(r) {
     const name = cleanText_(r[1], 120);
-    if (name) map[normalizeKey_(name)] = name;
+    if (name) map[personKey_(name)] = personName_(name);
   });
   dataRows_(APP.sheets.staffCommitments).forEach(function(r) {
     const name = cleanText_(r[1], 120);
-    if (name && !map[normalizeKey_(name)]) map[normalizeKey_(name)] = name;
+    if (name && !map[personKey_(name)]) map[personKey_(name)] = personName_(name);
   });
   return Object.keys(map).map(function(k) { return map[k]; }).sort();
 }
@@ -3899,11 +3899,11 @@ function uniqueTeacherNames_() {
   const map = {};
   optionalDataRows_(APP.sheets.teacherPlans).forEach(function(r) {
     const name = cleanText_(r[1], 120);
-    if (name) map[normalizeKey_(name)] = name;
+    if (name) map[personKey_(name)] = personName_(name);
   });
   dataRows_(APP.sheets.teacherCommitments).forEach(function(r) {
     const name = cleanText_(r[1], 120);
-    if (name && !map[normalizeKey_(name)]) map[normalizeKey_(name)] = name;
+    if (name && !map[personKey_(name)]) map[personKey_(name)] = personName_(name);
   });
   return Object.keys(map).map(function(k) { return map[k]; }).sort();
 }
@@ -3912,7 +3912,7 @@ function uniquePledgePersonnelNames_(rows) {
   const map = {};
   (rows || []).forEach(function(r) {
     const name = cleanText_(r[14], 120);
-    if (name) map[normalizeKey_(name)] = name;
+    if (name) map[personKey_(name)] = personName_(name);
   });
   return Object.keys(map).map(function(k) { return map[k]; }).sort();
 }
@@ -3920,8 +3920,8 @@ function uniquePledgePersonnelNames_(rows) {
 function uniqueReferenceNames_() {
   const map={};
   dataRows_(APP.sheets.users).forEach(function(r){userReferences_(r[4]).forEach(function(name){map[referenceKey_(name)]=name;});});
-  dataRows_(APP.sheets.pledges).forEach(function(r){const name=cleanText_(r[6],120);if(name&&!map[referenceKey_(name)])map[referenceKey_(name)]=name;});
-  dataRows_(APP.sheets.collections).forEach(function(r){const name=cleanText_(r[5],120);if(name&&!map[referenceKey_(name)])map[referenceKey_(name)]=name;});
+  dataRows_(APP.sheets.pledges).forEach(function(r){const name=personName_(r[6]);if(name&&!map[referenceKey_(name)])map[referenceKey_(name)]=name;});
+  dataRows_(APP.sheets.collections).forEach(function(r){const name=personName_(r[5]);if(name&&!map[referenceKey_(name)])map[referenceKey_(name)]=name;});
   return Object.keys(map).map(function(k){return map[k];}).sort(function(a,b){return a.localeCompare(b,'tr');});
 }
 
@@ -3932,6 +3932,15 @@ function isStudentPledgeRow_(row) {
 function normalizeKey_(value) {
   return String(value || '').trim().toLocaleLowerCase('tr-TR');
 }
+
+function personName_(value) {
+  return cleanText_(String(value || '').normalize('NFKC').replace(/[\u200B-\u200D\uFEFF]/g, '').replace(/\u00A0/g, ' '), 120)
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLocaleUpperCase('tr-TR');
+}
+
+function personKey_(value) { return referenceKey_(value); }
 
 function referenceKey_(value) {
   return String(value || '')
