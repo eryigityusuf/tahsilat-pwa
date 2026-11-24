@@ -2,7 +2,7 @@ const state={token:'',data:null,view:'dashboard',pages:{},pageSizes:{collections
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='96';
+const PWA_BUILD='97';
 const PLEDGE_REFERENCE_TYPES=['PERSONEL','İHVAN','AHAVAT'];
 const SUPABASE_API='https://yrhirwtwokzmixfbjlde.supabase.co/functions/v1/tahsilat-api';
 const IDLE_SESSION_MS=30*60*1000;
@@ -208,11 +208,11 @@ function pledgeCollectionsModal(id){
   const movements=(state.data.collections||[]).filter(x=>String(x.pledgeId||'')===String(id)).slice().sort((a,b)=>String(b.date||'').localeCompare(String(a.date||''))||String(b.createdAt||'').localeCompare(String(a.createdAt||''))||String(b.id||'').localeCompare(String(a.id||'')));
   const totalFor=status=>movements.filter(x=>x.approvalStatus===status).reduce((sum,x)=>sum+(Number(x.amount)||0),0);
   const approved=totalFor('ONAYLANDI'),pending=totalFor('BEKLİYOR'),rejected=totalFor('REDDEDİLDİ');
-  const rows=movements.map(x=>`<tr><td>${date(x.date)}</td><td>${esc(x.receiptNo||'—')}</td><td class="money"><strong>${money(x.amount)}</strong>${x.foreignAmount?`<small>${foreignMoney(x.foreignAmount,x.currency)} × ${Number(x.exchangeRate).toLocaleString('tr-TR')}</small>`:''}</td><td>${esc(x.method||'—')}</td><td>${esc(x.accountName||'—')}</td><td><span class="status ${statusClass(x.approvalStatus)}">${esc(x.approvalStatus)}</span>${x.rejectionReason?`<small class="cell-note">${esc(x.rejectionReason)}</small>`:''}</td><td class="money">${x.remainingAfter===null||x.remainingAfter===undefined?'—':money(x.remainingAfter)}</td><td class="pledge-collection-note">${esc(x.note||'—')}</td></tr>`);
+  const rows=movements.map(x=>`<tr><td>${date(x.date)}</td><td class="money pledge-collection-amount"><strong>${money(x.amount)}</strong>${x.foreignAmount?`<small>${foreignMoney(x.foreignAmount,x.currency)} × ${Number(x.exchangeRate).toLocaleString('tr-TR')}</small>`:''}</td><td class="pledge-collection-note">${esc(x.note||'Açıklama girilmemiş')}</td><td>${esc(x.method||'—')}</td><td>${esc(x.accountName||'—')}</td><td><span class="status ${statusClass(x.approvalStatus)}">${esc(x.approvalStatus)}</span>${x.rejectionReason?`<small class="cell-note">${esc(x.rejectionReason)}</small>`:''}</td><td class="money">${x.remainingAfter===null||x.remainingAfter===undefined?'—':money(x.remainingAfter)}</td></tr>`);
   const context=`<div class="pledge-collections-context"><div><span>HESAP ADI</span><strong>${esc(pledge.fullName)}</strong></div><div><span>FAALİYET</span><strong>${esc(pledge.activity||pledge.subActivity||'Belirtilmemiş')}</strong></div><div><span>REFERANS</span><strong>${esc(pledge.reference||'Referanssız')}</strong></div></div>`;
   const summary=`<div class="pledge-collection-summary"><div><span>Taahhüt</span><strong>${money(pledge.amount)}</strong></div><div class="approved"><span>Onaylanan</span><strong>${money(approved)}</strong></div><div class="pending"><span>Onay bekleyen</span><strong>${money(pending)}</strong></div><div class="remaining"><span>Güncel kalan</span><strong>${money(pledge.remaining)}</strong></div></div>`;
   const note=rejected>0?`<div class="modal-warning-note">Reddedilen tahsilat toplamı ${money(rejected)} tutarındadır ve taahhüdün ödenen/kalan hesabına dahil değildir.</div>`:'';
-  showModal('Taahhüt tahsilat hareketleri',`<div class="pledge-collections-modal">${context}${summary}${note}<div class="pledge-collections-head"><strong>${movements.length} tahsilat hareketi</strong><span>En yeni tahsilat üstte gösterilir.</span></div>${table(['Tarih','Makbuz No','Tutar','Yöntem','Kasa / Banka','Onay','Ödeme Sonrası Kalan','Açıklama'],rows,'Bu taahhüde ait tahsilat hareketi bulunmuyor.','compact')}</div>`)
+  showModal('Taahhüt tahsilat hareketleri',`<div class="pledge-collections-modal">${context}${summary}${note}<div class="pledge-collections-head"><strong>${movements.length} tahsilat hareketi</strong><span>Tutar ve açıklama bilgileri öne alınmıştır.</span></div>${table(['Tarih','Tutar','Açıklama','Yöntem','Kasa / Banka','Onay','Kalan'],rows,'Bu taahhüde ait tahsilat hareketi bulunmuyor.','compact')}</div>`)
 }
 function setPledgeSort(value){state.pledgeSort=value||'date-desc';state.selectedPledgeId='';resetPage('pledges-'+state.pledgeTab);renderPledges()}
 function pledgeColumnFilterModal(key){
