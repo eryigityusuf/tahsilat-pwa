@@ -42,6 +42,7 @@ const period = [
   collection('C5', '', 'İHVAN', 1808, 'DİĞER'),
   collection('C6', '', 'AHAVAT', 9270, 'GIDA'),
   collection('C7', 'P2', '', 200),
+  collection('C8', '', 'GENEL BAĞIŞ', 13150, 'GENEL TEBERRU'),
 ];
 
 const activities = context.groupActivities_(pledges, period, period);
@@ -50,15 +51,19 @@ const referenceTypes = context.groupReferenceTypes_(pledges, period);
 const sum = items => items.reduce((total, item) => total + Number(item.period || 0), 0);
 const byName = (items, name) => items.find(item => context.normalizeHeader_(item.name) === context.normalizeHeader_(name));
 
-assert.equal(sum(activities), 30278, 'Faaliyet toplamı tüm dönem gelirlerini içermeli.');
-assert.equal(sum(subActivities), 30278, 'Alt faaliyet toplamı faaliyet toplamına eşit olmalı.');
-assert.equal(sum(referenceTypes), 30278, 'Referans Nevi toplamı diğer dönem icmalleriyle eşit olmalı.');
+assert.equal(sum(activities), 43428, 'Faaliyet toplamı tüm dönem gelirlerini içermeli.');
+assert.equal(sum(subActivities), 43428, 'Alt faaliyet toplamı faaliyet toplamına eşit olmalı.');
+assert.equal(sum(referenceTypes), 43428, 'Referans Nevi toplamı diğer dönem icmalleriyle eşit olmalı.');
 assert.equal(byName(activities, 'DİĞER').period, 1808, 'Diğer geliri faaliyet toplamından çıkarılmamalı.');
 assert.equal(byName(subActivities, 'BAĞIŞ KURBAN').period, 19000, 'Kurban teberruları Bağış Kurban altında birleşmeli.');
 assert.equal(byName(subActivities, 'GIDA').period, 9270);
+assert.equal(byName(activities, 'GENEL TEBERRU').period, 13150, 'Doğrudan teberrunun ana faaliyeti Genel Teberru olmalı.');
+assert.equal(byName(subActivities, 'GENEL BAĞIŞ').period, 13150, 'Doğrudan teberrunun bağış türü alt faaliyet olmalı.');
+assert.deepEqual(Array.from(byName(subActivities, 'GENEL BAĞIŞ').collectionIds), ['C8'], 'Detay penceresi dönem hareket kimliklerini almalı.');
 assert.equal(byName(subActivities, 'SAHUR').period, 200);
 assert.equal(byName(referenceTypes, 'İHVAN').period, 17808, 'Doğrudan teberrunun Referans Nevi korunmalı.');
 assert.equal(byName(referenceTypes, 'AHAVAT').period, 10270);
 assert.equal(byName(referenceTypes, 'PERSONEL').period, 2000);
+assert.equal(byName(referenceTypes, 'Belirtilmemiş').period, 13350, 'Referans Nevi boşsa yalnız Referans Nevi analizinde belirtilmemiş kalmalı.');
 
 console.log(JSON.stringify({ activityTotal: sum(activities), subActivityTotal: sum(subActivities), referenceTypeTotal:sum(referenceTypes), ok: true }));

@@ -1326,7 +1326,7 @@ function bulkImportDonations(token, payload) {
         collectionAdds.push([
           systemId, date, '', name, paymentType, reference, name, amount, method,
           receiptNo ? 'Toplu teberru aktarımı · Makbuz: ' + receiptNo : 'Toplu teberru aktarımı', session.email, new Date(), account.id, account.name,
-          'ONAYLANDI', session.email, new Date(), '', receiptNo, group, activity, phone
+          'ONAYLANDI', session.email, new Date(), '', receiptNo, group, activity || paymentType, phone
         ]);
         historyAdds.push([systemId, 'HIZLI BAĞIŞ', systemId, date, amount, session.email, new Date()]);
         result.imported++;
@@ -1540,6 +1540,7 @@ function saveQuickDonation(token, payload) {
       cleanText_(payload.method, 50), cleanText_(payload.note, 300), session.email, new Date(), account.values[0], account.values[1]
     ].concat(collectionApprovalMeta_(session)), fx);
     fxRow[19] = cleanText_(payload.group, 100);
+    fxRow[20] = cleanText_(payload.activity, 120) || 'GENEL TEBERRU';
     fxRow[25] = refType;
     appendRows_(collectionSheet, [fxRow], HEADERS.collections.length);
     audit_(session.email, isApproverSession_(session) ? 'HIZLI_BAĞIŞ_ONAYLANDI' : 'HIZLI_BAĞIŞ_ONAYA_GÖNDERİLDİ', 'Doğrudan Gelir', id, fullName + ' / ' + amount + ' TL / ' + account.values[1]);
@@ -1589,6 +1590,7 @@ function updateCollection(token, payload) {
       sh.getRange(current.row, 4, 1, 4).setValues([directMeta]);
       if (payload.referenceType !== undefined) sh.getRange(current.row, 26).setValue(cleanText_(payload.referenceType, 30));
       if (payload.group !== undefined) sh.getRange(current.row, 20).setValue(cleanText_(payload.group, 100));
+      sh.getRange(current.row, 21).setValue(cleanText_(payload.activity, 120) || 'GENEL TEBERRU');
     }
     sh.getRange(current.row, 8, 1, 3).setValues([[amount, cleanText_(payload.method, 50), cleanText_(payload.note, 300)]]);
     sh.getRange(current.row, 13, 1, 2).setValues([[account.values[0], account.values[1]]]);
@@ -3403,15 +3405,18 @@ function groupSubActivities_(pledges, collections, periodCollections) {
   function item_(name) {
     name = cleanText_(name,120) || 'Belirtilmemiş';
     const key = normalizeKey_(name) || 'belirtilmemis';
-    return map[key] || (map[key] = { name:name, pledged:0, collected:0, period:0 });
+    return map[key] || (map[key] = { name:name, pledged:0, collected:0, period:0, collectionIds:[] });
   }
   function collectionName_(row) {
     const pledge = pledgeMap[String(row && row[2] || '')];
     if (pledge) return nameForPledge_(pledge);
     const activity = cleanText_(row && row[20],120);
-    // Doğrudan teberruda ayrı bir alt faaliyet alanı yoktur. Faaliyet değeri
-    // alt faaliyet icmalinde de kullanılır; Referans Nevi kategoriye karışmaz.
-    let type = activity || 'Belirtilmemiş';
+    const legacyType = cleanText_(row && row[4],120);
+    const legacyReferenceType = ['PERSONEL','İHVAN','AHAVAT'].some(function(type) { return normalizeHeader_(type) === normalizeHeader_(legacyType); });
+    // Yeni doğrudan teberrularda ana faaliyet GENEL TEBERRU, alt faaliyet ise
+    // Bağış Türü sütununda saklanır. Eski kayıtlarda Bağış Türü Referans Nevi
+    // içeriyorsa gerçek alt faaliyet için eski Faaliyet alanı korunur.
+    let type = (legacyType && !legacyReferenceType ? legacyType : activity) || 'Belirtilmemiş';
     const typeHeader = normalizeHeader_(type);
     if (paymentChannelKeys[typeHeader]) type = 'Belirtilmemiş';
     let key = normalizeKey_(type);
@@ -3437,7 +3442,7 @@ function groupSubActivities_(pledges, collections, periodCollections) {
   });
   (periodCollections || []).forEach(function(r) {
     const name = collectionName_(r);
-    if (name) item_(name).period += Number(r[7] || 0);
+    if (name) { const x=item_(name);x.period += Number(r[7] || 0);x.collectionIds.push(String(r[0] || '')); }
   });
   return Object.keys(map).map(k => Object.assign(map[k], { remaining: map[k].pledged - map[k].collected }));
 }
@@ -3455,18 +3460,16 @@ function groupActivities_(pledges, collections, periodCollections) {
   function item_(name) {
     name = cleanText_(name,120) || 'Belirtilmemiş';
     const key = normalizeKey_(name) || 'belirtilmemis';
-    return map[key] || (map[key] = { name:name, pledged:0, collected:0, period:0 });
+    return map[key] || (map[key] = { name:name, pledged:0, collected:0, period:0, collectionIds:[] });
   }
   function collectionName_(row) {
     const pledge = pledgeMap[String(row && row[2] || '')];
     if (pledge) return nameForPledge_(pledge);
     const activity = cleanText_(row && row[20],120);
     if (activity) return activity;
-    const legacyType = cleanText_(row && row[4],120);
-    const legacyKey = normalizeHeader_(legacyType);
-    // Eski kayıtlardaki Nakit/Banka değerleri kategori olarak gösterilmez;
-    // ancak gelir toplamdan da çıkarılmaz ve Belirtilmemiş altında korunur.
-    return legacyType ? (paymentChannelKeys[legacyKey] ? 'Belirtilmemiş' : legacyType) : 'Belirtilmemiş';
+    // Doğrudan teberruların ana faaliyeti sabittir. Eski kayıtlarda faaliyet
+    // boş olsa da alt faaliyet adı ana faaliyet gibi değerlendirilmez.
+    return 'GENEL TEBERRU';
   }
   (pledges || []).forEach(function(r) {
     pledgeMap[String(r[0])] = r;
@@ -3478,7 +3481,7 @@ function groupActivities_(pledges, collections, periodCollections) {
   });
   (periodCollections || []).forEach(function(r) {
     const name = collectionName_(r);
-    if (name) item_(name).period += Number(r[7] || 0);
+    if (name) { const x=item_(name);x.period += Number(r[7] || 0);x.collectionIds.push(String(r[0] || '')); }
   });
   return Object.keys(map).map(function(k) {
     return Object.assign(map[k], { remaining:map[k].pledged - map[k].collected });
@@ -3496,12 +3499,13 @@ function groupReferenceTypes_(pledges, periodCollections) {
     // onaylı dönem tahsilatı havuzunu kullanır ve toplamları eşit kalır.
     const name = collectionReferenceType_(row, pledge) || 'Belirtilmemiş';
     const key = normalizeKey_(name) || 'belirtilmemis';
-    const item = map[key] || (map[key] = { name:name, period:0 });
+    const item = map[key] || (map[key] = { name:name, period:0, collectionIds:[] });
     item.period += Number(row[7] || 0);
+    item.collectionIds.push(String(row[0] || ''));
   });
   const total = Object.keys(map).reduce(function(sum, key) { return sum + map[key].period; }, 0);
   return Object.keys(map).map(function(key) {
-    return { name:map[key].name, period:map[key].period, rate:total ? map[key].period / total : 0 };
+    return { name:map[key].name, period:map[key].period, rate:total ? map[key].period / total : 0, collectionIds:map[key].collectionIds };
   }).sort(function(a, b) { return b.period - a.period; });
 }
 
