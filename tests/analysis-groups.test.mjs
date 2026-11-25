@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const source = fs.readFileSync(new URL('../Code.gs', import.meta.url), 'utf8');
-const start = source.indexOf('function groupSubActivities_');
+const start = source.indexOf('function canonicalSubActivity_');
 const end = source.indexOf('function groupReferences_');
 assert.ok(start >= 0 && end > start, 'Analiz işlevleri bulunamadı.');
 
@@ -65,5 +65,17 @@ assert.equal(byName(referenceTypes, 'İHVAN').period, 17808, 'Doğrudan teberrun
 assert.equal(byName(referenceTypes, 'AHAVAT').period, 10270);
 assert.equal(byName(referenceTypes, 'PERSONEL').period, 2000);
 assert.equal(byName(referenceTypes, 'Belirtilmemiş').period, 13350, 'Referans Nevi boşsa yalnız Referans Nevi analizinde belirtilmemiş kalmalı.');
+
+const legacyPledges = [pledge('PX', 'GENEL BAĞIŞ', 'GENEL TEBERRU')];
+const legacyPeriod = [
+  collection('CX', 'PX', '', 500),
+  collection('CY', '', 'GENEL TEBERRU', 100, 'GENEL BAĞIŞ'),
+];
+const legacyActivities = context.groupActivities_(legacyPledges, legacyPeriod, legacyPeriod);
+const legacySubActivities = context.groupSubActivities_(legacyPledges, legacyPeriod, legacyPeriod);
+assert.equal(legacyActivities.length, 1, 'Genel Bağış faaliyet adı Genel Teberru ile tek kalemde birleşmeli.');
+assert.equal(byName(legacyActivities, 'GENEL TEBERRU').period, 600, 'Faaliyet analizinde yalnız Genel Teberru görünmeli.');
+assert.equal(legacySubActivities.length, 1, 'Genel Teberru alt faaliyet adı Genel Bağış ile tek kalemde birleşmeli.');
+assert.equal(byName(legacySubActivities, 'GENEL BAĞIŞ').period, 600, 'Alt faaliyet analizinde yalnız Genel Bağış görünmeli.');
 
 console.log(JSON.stringify({ activityTotal: sum(activities), subActivityTotal: sum(subActivities), referenceTypeTotal:sum(referenceTypes), ok: true }));

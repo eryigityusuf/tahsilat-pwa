@@ -7,7 +7,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 23,
+  cacheSchemaVersion: 24,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -1527,7 +1527,7 @@ function saveQuickDonation(token, payload) {
   payload = payload || {};
   const amount = positiveNumber_(payload.amount, 'Bağış tutarı');
   const date = parseDate_(payload.date, 'Bağış tarihi');
-  const donationType = cleanText_(payload.donationType, 80);
+  const donationType = canonicalSubActivity_(payload.donationType);
   const fullName = cleanText_(payload.fullName, 120);
   const reference = isApproverSession_(session) ? cleanText_(payload.reference, 100) : referenceForSession_(session, payload.reference);
   const account = findRowBy_(APP.sheets.cashAccounts, 1, cleanText_(payload.accountId, 60));
@@ -1575,7 +1575,7 @@ function updateCollection(token, payload) {
     }
     let directMeta = null;
     if (!pledge) {
-      const donationType = cleanText_(payload.donationType, 80);
+      const donationType = canonicalSubActivity_(payload.donationType);
       const fullName = cleanText_(payload.fullName, 120);
       const reference = cleanText_(payload.reference, 100);
       if (!donationType || !fullName || !reference) throw new Error('Bağış türü, bağışçı ve referans zorunludur.');
@@ -3398,6 +3398,20 @@ function studentPaymentPlanDto_(pledgeRow, planRow, paymentRows) {
   };
 }
 
+function canonicalSubActivity_(value) {
+  const name = cleanText_(value, 120);
+  const header = normalizeHeader_(name);
+  if (header === 'GENEL TEBERRU' || header === 'GENEL BAGIS') return 'GENEL BAĞIŞ';
+  return name;
+}
+
+function canonicalActivity_(value) {
+  const name = cleanText_(value, 120);
+  const header = normalizeHeader_(name);
+  if (header === 'GENEL TEBERRU' || header === 'GENEL BAGIS') return 'GENEL TEBERRU';
+  return name;
+}
+
 function groupSubActivities_(pledges, collections, periodCollections) {
   const map = {};
   const pledgeMap = {};
@@ -3405,9 +3419,9 @@ function groupSubActivities_(pledges, collections, periodCollections) {
     'NAKIT':true, 'BANKA':true, 'HAVALE':true, 'EFT':true, 'POS':true,
     'KREDI KARTI':true, 'HAVALE / EFT':true, 'KART / POS':true
   };
-  function nameForPledge_(row) { return cleanText_(row && row[18],120) || cleanText_(row && row[17],120) || cleanText_(row && row[2],120) || 'Belirtilmemiş'; }
+  function nameForPledge_(row) { return canonicalSubActivity_(row && row[18]) || canonicalSubActivity_(row && row[17]) || canonicalSubActivity_(row && row[2]) || 'Belirtilmemiş'; }
   function item_(name) {
-    name = cleanText_(name,120) || 'Belirtilmemiş';
+    name = canonicalSubActivity_(name) || 'Belirtilmemiş';
     const key = normalizeKey_(name) || 'belirtilmemis';
     return map[key] || (map[key] = { name:name, pledged:0, collected:0, period:0, collectionIds:[] });
   }
@@ -3420,7 +3434,7 @@ function groupSubActivities_(pledges, collections, periodCollections) {
     // Yeni doğrudan teberrularda ana faaliyet GENEL TEBERRU, alt faaliyet ise
     // Bağış Türü sütununda saklanır. Eski kayıtlarda Bağış Türü Referans Nevi
     // içeriyorsa gerçek alt faaliyet için eski Faaliyet alanı korunur.
-    let type = (legacyType && !legacyReferenceType ? legacyType : activity) || 'Belirtilmemiş';
+    let type = canonicalSubActivity_((legacyType && !legacyReferenceType ? legacyType : activity)) || 'Belirtilmemiş';
     const typeHeader = normalizeHeader_(type);
     if (paymentChannelKeys[typeHeader]) type = 'Belirtilmemiş';
     let key = normalizeKey_(type);
@@ -3459,17 +3473,17 @@ function groupActivities_(pledges, collections, periodCollections) {
     'KREDI KARTI':true, 'HAVALE / EFT':true, 'KART / POS':true
   };
   function nameForPledge_(row) {
-    return cleanText_(row && row[17],120) || cleanText_(row && row[2],120) || 'Belirtilmemiş';
+    return canonicalActivity_(row && row[17]) || canonicalActivity_(row && row[2]) || 'Belirtilmemiş';
   }
   function item_(name) {
-    name = cleanText_(name,120) || 'Belirtilmemiş';
+    name = canonicalActivity_(name) || 'Belirtilmemiş';
     const key = normalizeKey_(name) || 'belirtilmemis';
     return map[key] || (map[key] = { name:name, pledged:0, collected:0, period:0, collectionIds:[] });
   }
   function collectionName_(row) {
     const pledge = pledgeMap[String(row && row[2] || '')];
     if (pledge) return nameForPledge_(pledge);
-    const activity = cleanText_(row && row[20],120);
+    const activity = canonicalActivity_(row && row[20]);
     if (activity) return activity;
     // Doğrudan teberruların ana faaliyeti sabittir. Eski kayıtlarda faaliyet
     // boş olsa da alt faaliyet adı ana faaliyet gibi değerlendirilmez.

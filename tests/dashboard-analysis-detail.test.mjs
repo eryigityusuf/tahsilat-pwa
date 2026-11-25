@@ -10,8 +10,10 @@ assert.match(client, /analysisBars\(subActivities,'subactivity'\)/, 'Alt faaliye
 assert.match(client, /Teberruyu.*düzelt/, 'Doğrudan teberru detayında düzeltme düğmesi bulunmalı.');
 assert.match(client, /Taahhüdü düzelt/, 'Bağlı tahsilatta taahhüt düzeltme düğmesi bulunmalı.');
 assert.match(client, /inputField\('Faaliyet','fActivity'.*GENEL TEBERRU.*readonly/, 'Teberru faaliyeti Genel Teberru olarak sabit olmalı.');
-assert.match(client, /selectField\('Alt Faaliyet','fType',state\.data\.donationTypes\)/, 'Alt faaliyet mevcut türlerden seçilmeli.');
+assert.match(client, /selectField\('Alt Faaliyet','fType',donationSubActivityOptions\(\)\)/, 'Alt faaliyet mevcut türlerin birleştirilmiş listesinden seçilmeli.');
+assert.match(client, /canonicalDonationSubActivity/, 'Genel Teberru alt faaliyet adı Genel Bağış olarak birleştirilmeli.');
 assert.match(server, /collectionIds:\[\]/, 'Sunucu analiz kalemlerine hareket kimliklerini eklemeli.');
 assert.match(server, /return 'GENEL TEBERRU'/, 'Eski doğrudan teberrular ana faaliyette Genel Teberru olmalı.');
+assert.match(server, /return 'GENEL BAĞIŞ'/, 'Alt faaliyet analizinde Genel Bağış adı kullanılmalı.');
 
 console.log(JSON.stringify({clickableAnalysis:true,editableDetails:true,generalDonationActivity:true,ok:true}));
