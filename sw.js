@@ -1,4 +1,4 @@
-const CACHE='tahsilat-shell-v49';
+const CACHE='tahsilat-shell-v50';
 const SHELL=['./','./index.html','./manifest.webmanifest','./icon-192.png','./icon-512.png'];
 
 self.addEventListener('install', event => {
