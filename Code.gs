@@ -2414,8 +2414,6 @@ function saveCurrentExpensePayment(token, payload) {
   const current = findRowBy_(APP.sheets.currentExpenses, 1, currentId);
   if (!current) throw new Error('Cari gider kaydı bulunamadı.');
   const amount = positiveNumber_(payload.amount, 'Ödeme tutarı');
-  const remaining = Number(current.values[6]) || 0;
-  if (amount > remaining) throw new Error('Ödeme tutarı kalan cari borcundan büyük olamaz.');
   const date = parseDate_(payload.date, 'Ödeme tarihi');
   const account = expensePaymentAccount_(payload.accountId);
   const available = cashAccountCurrentBalance_(account.values[0]);
@@ -2442,8 +2440,6 @@ function updateCurrentExpensePayment(token, payload) {
   const expense = findRowBy_(APP.sheets.currentExpenses, 1, current.values[2]);
   if (!expense) throw new Error('Bağlı cari gider kaydı bulunamadı.');
   const amount = positiveNumber_(payload.amount, 'Ödeme tutarı');
-  const allowed = (Number(expense.values[6]) || 0) + (Number(current.values[4]) || 0);
-  if (amount > allowed) throw new Error('Ödeme tutarı kalan cari borcundan büyük olamaz.');
   const date = parseDate_(payload.date, 'Ödeme tarihi');
   const account = expensePaymentAccount_(payload.accountId);
   const available = cashAccountCurrentBalance_(account.values[0]) + (current.values[6] === account.values[0] ? (Number(current.values[4]) || 0) : 0);
@@ -3800,6 +3796,11 @@ function generalExpenseData_(start,end,applyToLists) {
   const currentRows=optionalDataRows_(APP.sheets.currentExpenses);
   const paymentRows=optionalDataRows_(APP.sheets.currentExpensePayments);
   const receiptRows=optionalDataRows_(APP.sheets.receiptExpenses);
+  const currentById={};const accountBalances={};
+  currentRows.forEach(function(r){const key=normalizeKey_(r[2])||String(r[0]);currentById[String(r[0])]=key;const item=accountBalances[key]||(accountBalances[key]={amount:0,paid:0});item.amount+=n_(r[4]);});
+  paymentRows.forEach(function(r){const key=currentById[String(r[2])]||normalizeKey_(r[3])||String(r[2]);const item=accountBalances[key]||(accountBalances[key]={amount:0,paid:0});item.paid+=n_(r[4]);});
+  const currentRemaining=Object.keys(accountBalances).reduce(function(sum,key){return sum+Math.max(0,accountBalances[key].amount-accountBalances[key].paid);},0);
+  const currentCredit=Object.keys(accountBalances).reduce(function(sum,key){return sum+Math.max(0,accountBalances[key].paid-accountBalances[key].amount);},0);
   const visiblePayments=applyToLists?paymentRows.filter(function(r){return inRange_(r[1],start,end);}):paymentRows;
   const visibleReceipts=applyToLists?receiptRows.filter(function(r){return inRange_(r[1],start,end);}):receiptRows;
   return {
@@ -3812,7 +3813,8 @@ function generalExpenseData_(start,end,applyToLists) {
     summary:{
       currentTotal:sum_(currentRows,4),
       currentPaid:sum_(paymentRows,4),
-      currentRemaining:sum_(currentRows,6),
+      currentRemaining:currentRemaining,
+      currentCredit:currentCredit,
       receiptTotal:sum_(receiptRows,4),
       periodCurrentPaid:sum_(paymentRows.filter(function(r){return inRange_(r[1],start,end);}),4),
       periodReceiptTotal:sum_(receiptRows.filter(function(r){return inRange_(r[1],start,end);}),4)

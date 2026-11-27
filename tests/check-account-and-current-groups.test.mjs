@@ -7,6 +7,8 @@ const client=fs.readFileSync(new URL('../Scripts.html',import.meta.url),'utf8');
 const styles=fs.readFileSync(new URL('../Styles.html',import.meta.url),'utf8');
 assert.match(client,/\['KASA','BANKA','ÇEK'\]/,'Cari ve fiş ödemelerinde Çek hesabı seçilebilmeli.');
 assert.match(client,/function currentAccountKey\(value\)\{return normalizeSearch\(value\)/,'Cari adları Türkçe büyük-küçük harf farkından bağımsız gruplanmalı.');
+assert.match(client,/function currentExpensePaymentModal[\s\S]*?const groups=currentAccountGroups\(\)/,'Cari ödeme seçimi tahakkukları değil tekil firma hesaplarını göstermeli.');
+assert.match(client,/Alacaklı/,'Fazla ödeme cari alacak durumu olarak gösterilmeli.');
 assert.match(styles,/\.money,[^\n]+font-family:Cambria,"Times New Roman",Georgia,serif/,'Parasal sayılar klasik yazı karakteri kullanmalı.');
 
 const token='check-account-session';
@@ -18,9 +20,9 @@ const sheets={
   'Bağış Türleri':[['Bağış Türü','Aktif'],['GENEL BAĞIŞ',true]],
   'Taahhütler':[row(22,{0:'Taahhüt ID'}),row(22,{0:'TAA-1',1:2026,2:'GENEL BAĞIŞ',3:'TEST BAĞIŞÇI',6:'TEST REFERANS',7:1000,8:0,9:1000,10:'Ödenmedi',11:'2026-11-01',15:'AKTİF',17:'GENEL TEBERRU',18:'GENEL BAĞIŞ'})],
   'Tahsilatlar':[row(25,{0:'Tahsilat ID'})],
-  'Kasa Banka Hesapları':[row(10,{0:'Hesap ID'}),row(10,{0:'HSP-CEK',1:'Çek Portföyü',2:'ÇEK',3:5000,4:true}),row(10,{0:'HSP-NAKIT',1:'Nakit Kasa',2:'KASA',3:1000,4:true})],
+  'Kasa Banka Hesapları':[row(10,{0:'Hesap ID'}),row(10,{0:'HSP-CEK',1:'Çek Portföyü',2:'ÇEK',3:500000,4:true}),row(10,{0:'HSP-NAKIT',1:'Nakit Kasa',2:'KASA',3:1000,4:true})],
   'Hesap Transferleri':[row(19,{0:'Transfer ID'})],
-  'Cari Giderler':[row(10,{0:'Cari ID'}),row(10,{0:'CAR-1',1:2026,2:'AKDENİZ TOROS',3:'İaşe',4:750,5:0,6:750,7:'Ödenmedi',9:'2026-11-01'})],
+  'Cari Giderler':[row(10,{0:'Cari ID'}),row(10,{0:'CAR-1',1:2026,2:'AKDENİZ TOROS',3:'İaşe',4:86000,5:0,6:86000,7:'Ödenmedi',9:'2026-11-01'})],
   'Cari Ödeme Hareketleri':[row(10,{0:'Hareket ID'})],
   'İşlem Günlüğü':[row(6,{0:'Zaman'})]
 };
@@ -30,7 +32,7 @@ const runtime=makeRuntime(snapshot);
 const business=createBusiness(runtime);
 
 business.call('saveCollection',[token,{pledgeId:'TAA-1',amount:250,date:'2026-11-27',method:'Çek',accountId:'HSP-CEK',checkNo:'CHK-001',checkDueDate:'2026-12-15',checkDrawer:'TEST KEŞİDECİ',checkBank:'TEST BANKA',note:'Çek tahsilatı'}]);
-business.call('saveCurrentExpensePayment',[token,{currentId:'CAR-1',amount:300,date:'2026-11-27',accountId:'HSP-CEK',note:'Çek ile cari ödeme'}]);
+business.call('saveCurrentExpensePayment',[token,{currentId:'CAR-1',amount:200000,date:'2026-11-27',accountId:'HSP-CEK',note:'Fazla ödeme ile cari alacak'}]);
 const savedCheckId=runtime.patch().rows.find(x=>x.sheet==='Tahsilatlar'&&x.row_number===2)?.cells?.[0];
 business.call('saveAccountTransfer',[token,{sourceAccountId:'HSP-CEK',targetAccountId:'HSP-NAKIT',amount:250,date:'2026-12-15',checkId:savedCheckId,note:'Çek tahsili'}]);
 
@@ -48,4 +50,6 @@ assert.equal(accountTransfer?.[4],'HSP-NAKIT','Tahsil edilen çek Nakit Kasaya g
 const data=business.call('getAppData',[token,{}]);
 assert.ok(data.methods.includes('Çek'),'Çek yöntemi kullanıcı arayüzüne gönderilmeli.');
 assert.equal(data.cash.checks[0].status,'TAHSİL EDİLDİ','Tahsil edilen çek portföyde kapalı görünmeli.');
-console.log(JSON.stringify({checkCollection:true,checkPayment:true,classicNumbers:true,currentGrouping:true,ok:true}));
+assert.equal(data.generalExpenses.summary.currentRemaining,0,'Fazla ödemede cari borç bakiyesi sıfırlanmalı.');
+assert.equal(data.generalExpenses.summary.currentCredit,114000,'86.000 TL borca 200.000 TL ödeme 114.000 TL cari alacak üretmeli.');
+console.log(JSON.stringify({checkCollection:true,checkPayment:true,classicNumbers:true,currentGrouping:true,currentCredit:114000,ok:true}));

@@ -20,5 +20,6 @@ assert.equal(data.generalExpenses.allPayments.length,1,'Cari ekstresi tüm ödem
 assert.equal(data.generalExpenses.current[0].createdAt,'2026-11-01','Tahakkuk tarihi istemciye aktarılmalı.');
 assert.equal(data.generalExpenses.summary.currentTotal,1500,'Cari tahakkuk toplamı korunmalı.');
 assert.equal(data.generalExpenses.summary.currentRemaining,1100,'Cari kalan toplamı korunmalı.');
+assert.equal(data.generalExpenses.summary.currentCredit,0,'Borç varken cari alacak bakiyesi sıfır olmalı.');
 
 console.log(JSON.stringify({ accruals:2,payments:1,total:1500,remaining:1100,ok:true }));
