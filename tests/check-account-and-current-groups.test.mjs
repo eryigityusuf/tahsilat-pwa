@@ -35,17 +35,23 @@ business.call('saveCollection',[token,{pledgeId:'TAA-1',amount:250,date:'2026-11
 business.call('saveCurrentExpensePayment',[token,{currentId:'CAR-1',amount:200000,date:'2026-11-27',accountId:'HSP-CEK',note:'Fazla ödeme ile cari alacak'}]);
 const savedCheckId=runtime.patch().rows.find(x=>x.sheet==='Tahsilatlar'&&x.row_number===2)?.cells?.[0];
 business.call('saveAccountTransfer',[token,{sourceAccountId:'HSP-CEK',targetAccountId:'HSP-NAKIT',amount:250,date:'2026-12-15',checkId:savedCheckId,note:'Çek tahsili'}]);
+business.call('saveAccountTransfer',[token,{sourceAccountId:'HSP-CEK',targetAccountId:'HSP-NAKIT',amount:1000,date:'2026-12-16',note:'Devir çek bakiyesi tahsili'}]);
 
 const patchRows=runtime.patch().rows;
 const collection=patchRows.find(x=>x.sheet==='Tahsilatlar'&&x.row_number===2)?.cells;
 const currentPayment=patchRows.find(x=>x.sheet==='Cari Ödeme Hareketleri'&&x.row_number===2)?.cells;
 const accountTransfer=patchRows.find(x=>x.sheet==='Hesap Transferleri'&&x.row_number===2)?.cells;
+const legacyCheckTransfer=patchRows.find(x=>x.sheet==='Hesap Transferleri'&&x.row_number===3)?.cells;
 assert.equal(collection?.[8],'Çek','Tahsilat yöntemi Çek olarak kaydedilmeli.');
 assert.equal(collection?.[12],'HSP-CEK','Tahsilat Çek hesabına bağlanmalı.');
 assert.equal(currentPayment?.[5],'Çek','Cari ödeme yöntemi hesap türünden Çek olarak üretilmeli.');
 assert.equal(currentPayment?.[6],'HSP-CEK','Cari ödeme Çek hesabından düşmeli.');
 assert.equal(accountTransfer?.[2],'HSP-CEK','Tahsil edilen çek Çek hesabından çıkmalı.');
 assert.equal(accountTransfer?.[4],'HSP-NAKIT','Tahsil edilen çek Nakit Kasaya girmeli.');
+assert.equal(legacyCheckTransfer?.[2],'HSP-CEK','Devir/toplu çek bakiyesi Çek hesabından çıkmalı.');
+assert.equal(legacyCheckTransfer?.[4],'HSP-NAKIT','Devir/toplu çek bakiyesi Nakit Kasaya girmeli.');
+assert.equal(legacyCheckTransfer?.[12],'','Devir/toplu çek tahsilatında tekil çek kimliği zorunlu olmamalı.');
+assert.equal(legacyCheckTransfer?.[13],'DEVİR / TOPLU BAKİYE','Çek seçilmeden yapılan tahsilat açıklanabilir bir kaynak etiketi taşımalı.');
 
 const data=business.call('getAppData',[token,{}]);
 assert.ok(data.methods.includes('Çek'),'Çek yöntemi kullanıcı arayüzüne gönderilmeli.');

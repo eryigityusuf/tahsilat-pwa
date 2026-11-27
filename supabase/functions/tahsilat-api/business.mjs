@@ -2197,11 +2197,18 @@ function saveAccountTransfer(token, payload) {
   let checkBank = cleanText_(payload.checkBank, 120);
   if (sourceType === 'CEK') {
     const portfolio = checkPortfolio_(dataRows_(APP.sheets.collections), optionalDataRows_(APP.sheets.accountTransfers), optionalDataRows_(APP.sheets.cashAccounts));
-    const check = portfolio.filter(function(x){return x.id === checkId && x.accountId === sourceId && x.open;})[0];
-    if (!check) throw new Error('Tahsil edilecek açık çeki seçin.');
-    amount = check.amount;
-    checkNo = check.number; checkDueDate = check.dueDate ? parseDate_(check.dueDate, 'Çek vade tarihi') : '';
-    checkDrawer = check.drawer; checkBank = check.bank;
+    if (checkId) {
+      const check = portfolio.filter(function(x){return x.id === checkId && x.accountId === sourceId && x.open;})[0];
+      if (!check) throw new Error('Tahsil edilecek açık çek bulunamadı veya daha önce tahsil edildi.');
+      amount = check.amount;
+      checkNo = check.number; checkDueDate = check.dueDate ? parseDate_(check.dueDate, 'Çek vade tarihi') : '';
+      checkDrawer = check.drawer; checkBank = check.bank;
+    } else {
+      const reserved = portfolio.filter(function(x){return x.accountId === sourceId && x.open;}).reduce(function(sum,x){return sum+n_(x.amount);},0);
+      const unallocated = Math.max(0, Math.round((cashAccountCurrentBalance_(sourceId)-reserved)*100)/100);
+      if (amount > unallocated + 0.005) throw new Error('Devir/toplu çek bakiyesinde kullanılabilir tutar yetersiz. Kullanılabilir bakiye: ' + moneyText_(unallocated));
+      checkNo = 'DEVİR / TOPLU BAKİYE'; checkDueDate = ''; checkDrawer = ''; checkBank = '';
+    }
   } else if (targetType === 'CEK') {
     if (!checkNo || !checkDueDate) throw new Error('Çek hesabına aktarımda çek numarası ve vade tarihi zorunludur.');
   } else {
