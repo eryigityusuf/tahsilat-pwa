@@ -9,7 +9,8 @@ assert.match(client,/\['KASA','BANKA','ÇEK'\]/,'Cari ve fiş ödemelerinde Çek
 assert.match(client,/function currentAccountKey\(value\)\{return normalizeSearch\(value\)/,'Cari adları Türkçe büyük-küçük harf farkından bağımsız gruplanmalı.');
 assert.match(client,/function currentExpensePaymentModal[\s\S]*?const groups=currentAccountGroups\(\)/,'Cari ödeme seçimi tahakkukları değil tekil firma hesaplarını göstermeli.');
 assert.match(client,/Alacaklı/,'Fazla ödeme cari alacak durumu olarak gösterilmeli.');
-assert.match(styles,/\.money,[^\n]+font-family:Cambria,"Times New Roman",Georgia,serif/,'Parasal sayılar klasik yazı karakteri kullanmalı.');
+assert.match(styles,/--number-font:"Palatino Linotype","Book Antiqua",Palatino,Georgia,"Times New Roman",serif/,'Klasik sayı yazı karakteri merkezi olarak tanımlanmalı.');
+assert.match(styles,/\.money,[^\n]+font-family:var\(--number-font\)/,'Parasal ve özet sayıları klasik yazı karakterini kullanmalı.');
 
 const token='check-account-session';
 const future=new Date(Date.now()+60_000).toISOString();
