@@ -98,6 +98,11 @@ export function makeRuntime(snapshot) {
           return api;
         },
         getDataRange() { return api.getRange(1, 1, Math.max(1, api.getLastRow()), api.getLastColumn()); },
+        clear() {
+          bookSheets[name] = [];
+          if (persisted) { sizes[name] = 0; truncations[name] = 0; }
+          return api;
+        },
         getRange(r, c, h=1, w=1) {
           if (typeof r === 'string') {
             const match = r.match(/^([A-Z]+)(\d+)$/);

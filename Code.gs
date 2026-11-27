@@ -3,7 +3,7 @@ const APP = Object.freeze({
   dbProperty: 'TAHSILAT_DB_ID',
   sessionSeconds: 21600,
   appDataCacheSeconds: 300,
-  cacheSchemaVersion: 24,
+  cacheSchemaVersion: 25,
   dataRevisionProperty: 'TAHSILAT_DATA_REVISION',
   sheets: {
     users: 'Kullanıcılar',
@@ -12,6 +12,7 @@ const APP = Object.freeze({
     collections: 'Tahsilatlar',
     referenceTargets: 'Referans Hedefleri',
     cashAccounts: 'Kasa Banka Hesapları',
+    accountTransfers: 'Hesap Transferleri',
     loans: 'Borçlar',
     loanRepayments: 'Borç Geri Ödemeleri',
     staffPlans: 'Personel Aylık Planları',
@@ -34,9 +35,10 @@ const HEADERS = Object.freeze({
   users: ['Kullanıcı ID','Ad Soyad','E-posta','Rol','Referans Adı','PIN Salt','PIN Özeti','Aktif','Oluşturma Tarihi','Son Başarılı Giriş','Son Hatalı Giriş','Hatalı Giriş Sayısı','Son Giriş Durumu'],
   types: ['Bağış Türü','Aktif'],
   pledges: ['Taahhüt ID','Yıl','Bağış Türü','Ad Soyad','Telefon','Ödeyen','Referans','Taahhüt Tutarı','Ödenen','Kalan','Durum','Taahhüt Tarihi','Oluşturan','Oluşturma Zamanı','Personel','Alacak Durumu','Kayıt Kaynağı','Faaliyet','Alt Faaliyet','Hesap Kodu','Grubu','Notlar'],
-  collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni','Makbuz No','Grubu','Faaliyet','Telefon','Döviz Cinsi','Döviz Tutarı','Döviz Kuru','Referans Nevi'],
+  collections: ['Tahsilat ID','Tarih','Taahhüt ID','Ad Soyad','Bağış Türü','Referans','Ödeyen','Tutar','Ödeme Yöntemi','Açıklama','Oluşturan','Oluşturma Zamanı','Hesap ID','Hesap Adı','Onay Durumu','Onaylayan','Onay Zamanı','Red Nedeni','Makbuz No','Grubu','Faaliyet','Telefon','Döviz Cinsi','Döviz Tutarı','Döviz Kuru','Referans Nevi','Çek No','Çek Vade Tarihi','Keşideci','Çek Bankası'],
   referenceTargets: ['Hedef ID','Başlangıç','Bitiş','Referans','Teberru Hedefi','Tahsilat Hedefi','Aktif','Açıklama','Oluşturma Zamanı','Hedef Türü'],
   cashAccounts: ['Hesap ID','Hesap Adı','Hesap Türü','Açılış Bakiyesi','Aktif','Açıklama','Oluşturma Zamanı','Para Birimi','Açılış Döviz','Açılış Kuru'],
+  accountTransfers: ['Transfer ID','Tarih','Kaynak Hesap ID','Kaynak Hesap Adı','Hedef Hesap ID','Hedef Hesap Adı','TL Tutar','Açıklama','Kaynak Döviz','Hedef Döviz','Kaynak Kur','Hedef Kur','Çek ID','Çek No','Çek Vade Tarihi','Keşideci','Çek Bankası','Oluşturan','Oluşturma Zamanı'],
   loans: ['Borç ID','Alım Tarihi','Borç Veren','Alınan Tutar','Geri Ödenen','Kalan Borç','Durum','Hesap ID','Hesap Adı','Açıklama','Oluşturma Zamanı'],
   loanRepayments: ['Hareket ID','Tarih','Borç ID','Borç Veren','Tutar','Ödeme Yöntemi','Açıklama','Oluşturma Zamanı','Hesap ID','Hesap Adı'],
   staffPlans: ['Plan ID','Personel','Ödeme Türü','Aylık Tutar','Aktif','Açıklama','Oluşturma Zamanı'],
@@ -107,6 +109,7 @@ function setupSystem(adminName, adminEmail, adminPin) {
   createSheet_(ss, APP.sheets.collections, HEADERS.collections);
   createSheet_(ss, APP.sheets.referenceTargets, HEADERS.referenceTargets);
   createSheet_(ss, APP.sheets.cashAccounts, HEADERS.cashAccounts);
+  createSheet_(ss, APP.sheets.accountTransfers, HEADERS.accountTransfers);
   createSheet_(ss, APP.sheets.loans, HEADERS.loans);
   createSheet_(ss, APP.sheets.loanRepayments, HEADERS.loanRepayments);
   createSheet_(ss, APP.sheets.staffPlans, HEADERS.staffPlans);
@@ -140,6 +143,7 @@ function upgradeSystem() {
   resetRequestCache_();
   const ss = getDb_();
   if (!ss.getSheetByName(APP.sheets.cashAccounts)) createSheet_(ss, APP.sheets.cashAccounts, HEADERS.cashAccounts);
+  if (!ss.getSheetByName(APP.sheets.accountTransfers)) createSheet_(ss, APP.sheets.accountTransfers, HEADERS.accountTransfers);
   if (!ss.getSheetByName(APP.sheets.referenceTargets)) createSheet_(ss, APP.sheets.referenceTargets, HEADERS.referenceTargets);
   if (!ss.getSheetByName(APP.sheets.loans)) createSheet_(ss, APP.sheets.loans, HEADERS.loans);
   if (!ss.getSheetByName(APP.sheets.loanRepayments)) createSheet_(ss, APP.sheets.loanRepayments, HEADERS.loanRepayments);
@@ -154,6 +158,7 @@ function upgradeSystem() {
   if (!ss.getSheetByName(APP.sheets.receiptExpenses)) createSheet_(ss, APP.sheets.receiptExpenses, HEADERS.receiptExpenses);
   ensureSheetHeaders_(ss.getSheetByName(APP.sheets.collections), HEADERS.collections);
   ensureSheetHeaders_(ss.getSheetByName(APP.sheets.cashAccounts), HEADERS.cashAccounts);
+  ensureSheetHeaders_(ss.getSheetByName(APP.sheets.accountTransfers), HEADERS.accountTransfers);
   const referenceTargets = ss.getSheetByName(APP.sheets.referenceTargets);
   if (referenceTargets.getLastColumn() < HEADERS.referenceTargets.length) {
     const start = referenceTargets.getLastColumn() + 1;
@@ -1392,6 +1397,15 @@ function ensureSheetHeaders_(sheet, headers) {
   if (sheet.getLastColumn() < headers.length) sheet.getRange(1, 1, 1, headers.length).setValues([headers]).setFontWeight('bold');
 }
 
+function ensureFinanceTransferSheets_() {
+  const ss = getDb_();
+  let transfers = ss.getSheetByName(APP.sheets.accountTransfers);
+  if (!transfers) { createSheet_(ss, APP.sheets.accountTransfers, HEADERS.accountTransfers); transfers = ss.getSheetByName(APP.sheets.accountTransfers); }
+  ensureSheetHeaders_(transfers, HEADERS.accountTransfers);
+  ensureSheetHeaders_(ss.getSheetByName(APP.sheets.collections), HEADERS.collections);
+  return transfers;
+}
+
 function collectionFxMeta_(payload, account, tlAmount) {
   const isFx = String(account && account.values && account.values[2] || '').toUpperCase() === 'DÖVİZ';
   if (!isFx) return { currency:'', foreignAmount:'', exchangeRate:'' };
@@ -1404,11 +1418,25 @@ function collectionFxMeta_(payload, account, tlAmount) {
   return { currency:currency, foreignAmount:foreignAmount, exchangeRate:exchangeRate };
 }
 
-function collectionRowWithFx_(row, fx) {
-  while (row.length < 22) row.push('');
+function collectionCheckMeta_(payload, account) {
+  const isCheck = normalizeHeader_(account && account.values && account.values[2]) === 'CEK';
+  if (!isCheck) return { number:'', dueDate:'', drawer:'', bank:'' };
+  const number = cleanText_(payload.checkNo, 80);
+  const dueDate = parseDate_(payload.checkDueDate, 'Çek vade tarihi');
+  if (!number) throw new Error('Çek hesabına kayıt için çek numarası zorunludur.');
+  return { number:number, dueDate:dueDate, drawer:cleanText_(payload.checkDrawer,120), bank:cleanText_(payload.checkBank,120) };
+}
+
+function collectionRowWithFx_(row, fx, check) {
+  while (row.length < HEADERS.collections.length) row.push('');
   row[22] = fx.currency || '';
   row[23] = fx.foreignAmount === '' ? '' : fx.foreignAmount;
   row[24] = fx.exchangeRate === '' ? '' : fx.exchangeRate;
+  check = check || {};
+  row[26] = check.number || '';
+  row[27] = check.dueDate || '';
+  row[28] = check.drawer || '';
+  row[29] = check.bank || '';
   return row;
 }
 
@@ -1431,13 +1459,14 @@ function saveCollection(token, payload) {
     const account = findRowBy_(APP.sheets.cashAccounts, 1, accountId);
     if (!account || account.values[4] !== true) throw new Error('Aktif bir kasa veya banka hesabı seçin.');
     const fx = collectionFxMeta_(payload, account, amount);
+    const check = collectionCheckMeta_(payload, account);
     const ss = getDb_();
     const collectionSheet = ss.getSheetByName(APP.sheets.collections);
     ensureSheetHeaders_(collectionSheet, HEADERS.collections);
     const row = collectionRowWithFx_([
       id, date, current.values[0], current.values[3], current.values[2], current.values[6],
       current.values[5], amount, cleanText_(payload.method, 50), cleanText_(payload.note, 300), session.email, new Date(), account.values[0], account.values[1]
-    ].concat(collectionApprovalMeta_(session)), fx);
+    ].concat(collectionApprovalMeta_(session)), fx, check);
     row[19] = cleanText_(payload.group ?? current.values[20], 100);
     appendRows_(collectionSheet, [row], HEADERS.collections.length);
     if (isApproverSession_(session)) {
@@ -1530,6 +1559,7 @@ function saveQuickDonation(token, payload) {
   if (!donationType || !fullName || !reference) throw new Error('Bağış türü, bağışçı ve referans zorunludur.');
   if (!account || account.values[4] !== true) throw new Error('Aktif bir kasa veya banka hesabı seçin.');
   const fx = collectionFxMeta_(payload, account, amount);
+  const check = collectionCheckMeta_(payload, account);
   const id = makeId_('HBG');
   withLock_(function() {
     const collectionSheet = getDb_().getSheetByName(APP.sheets.collections);
@@ -1538,7 +1568,7 @@ function saveQuickDonation(token, payload) {
     const fxRow = collectionRowWithFx_([
       id, date, '', fullName, donationType, reference, cleanText_(payload.payer, 120), amount,
       cleanText_(payload.method, 50), cleanText_(payload.note, 300), session.email, new Date(), account.values[0], account.values[1]
-    ].concat(collectionApprovalMeta_(session)), fx);
+    ].concat(collectionApprovalMeta_(session)), fx, check);
     fxRow[19] = cleanText_(payload.group, 100);
     fxRow[20] = cleanText_(payload.activity, 120) || 'GENEL TEBERRU';
     fxRow[25] = refType;
@@ -1557,9 +1587,11 @@ function updateCollection(token, payload) {
   const account = findRowBy_(APP.sheets.cashAccounts, 1, cleanText_(payload.accountId, 60));
   if (!account || account.values[4] !== true) throw new Error('Aktif bir kasa veya banka hesabı seçin.');
   const fx = collectionFxMeta_(payload, account, amount);
+  const check = collectionCheckMeta_(payload, account);
   withLock_(function() {
     const current = findRowBy_(APP.sheets.collections, 1, id);
     if (!current) throw new Error('Tahsilat bulunamadı.');
+    if (checkHasCollectionTransfer_(id)) throw new Error('Bu çek tahsil edilmiştir. Tahsil edilmiş çek kaydı değiştirilemez.');
     const wasApproved = isCollectionApprovedRow_(current.values);
     const pledgeId = String(current.values[2] || '');
     const pledge = pledgeId ? findRowBy_(APP.sheets.pledges, 1, pledgeId) : null;
@@ -1596,6 +1628,7 @@ function updateCollection(token, payload) {
     sh.getRange(current.row, 13, 1, 2).setValues([[account.values[0], account.values[1]]]);
     ensureSheetHeaders_(sh, HEADERS.collections);
     sh.getRange(current.row, 23, 1, 3).setValues([[fx.currency, fx.foreignAmount, fx.exchangeRate]]);
+    sh.getRange(current.row, 27, 1, 4).setValues([[check.number, check.dueDate, check.drawer, check.bank]]);
     resetRequestCache_();
     if (pledge) recalculatePledge_(pledgeId);
     audit_(session.email, 'DÜZELTİLDİ', 'Tahsilat', id, amount + ' TL');
@@ -1768,6 +1801,7 @@ function deleteCollection(token, collectionId) {
   withLock_(function() {
     const current = findRowBy_(APP.sheets.collections, 1, id);
     if (!current) throw new Error('Tahsilat bulunamadı.');
+    if (checkHasCollectionTransfer_(id)) throw new Error('Bu çek tahsil edilmiştir. Önce bağlı hesap aktarımını geri almalısınız.');
     const pledgeId = current.values[2];
     const pledge = findRowBy_(APP.sheets.pledges, 1, pledgeId);
     if (isCollectionApprovedRow_(current.values) && (!pledge || String(pledge.values[15] || 'AKTİF').toUpperCase() !== 'ŞÜPHELİ')) {
@@ -2130,6 +2164,65 @@ function setCashAccountActive(token, accountId, active) {
   return {ok:true};
 }
 
+function accountTransferFxMeta_(payload, prefix, account, amount) {
+  if (normalizeHeader_(account.values[2]) !== 'DOVIZ') return { foreign:'', rate:'' };
+  const foreign = positiveNumber_(payload[prefix + 'Foreign'], prefix === 'source' ? 'Çıkan dolar tutarı' : 'Giren dolar tutarı');
+  const rate = positiveNumber_(payload[prefix + 'Rate'], 'Dolar kuru');
+  if (Math.abs(Math.round(foreign * rate * 100) / 100 - amount) > 0.02) throw new Error('Döviz tutarı × kur, TL transfer tutarıyla eşleşmelidir.');
+  return { foreign:foreign, rate:rate };
+}
+
+function saveAccountTransfer(token, payload) {
+  const session = requireApprover_(token);
+  payload = payload || {};
+  ensureFinanceTransferSheets_();
+  const sourceId = cleanText_(payload.sourceAccountId, 60);
+  const targetId = cleanText_(payload.targetAccountId, 60);
+  if (!sourceId || !targetId || sourceId === targetId) throw new Error('Kaynak ve hedef hesap farklı olmalıdır.');
+  const source = findRowBy_(APP.sheets.cashAccounts, 1, sourceId);
+  const target = findRowBy_(APP.sheets.cashAccounts, 1, targetId);
+  if (!source || source.values[4] !== true || !target || target.values[4] !== true) throw new Error('Aktarım için iki aktif hesap seçin.');
+  let amount = positiveNumber_(payload.amount, 'Transfer tutarı');
+  const date = parseDate_(payload.date, 'Transfer tarihi');
+  const sourceType = normalizeHeader_(source.values[2]);
+  const targetType = normalizeHeader_(target.values[2]);
+  let checkId = cleanText_(payload.checkId, 80);
+  let checkNo = cleanText_(payload.checkNo, 80);
+  let checkDueDate = payload.checkDueDate ? parseDate_(payload.checkDueDate, 'Çek vade tarihi') : '';
+  let checkDrawer = cleanText_(payload.checkDrawer, 120);
+  let checkBank = cleanText_(payload.checkBank, 120);
+  if (sourceType === 'CEK') {
+    const portfolio = checkPortfolio_(dataRows_(APP.sheets.collections), optionalDataRows_(APP.sheets.accountTransfers), optionalDataRows_(APP.sheets.cashAccounts));
+    const check = portfolio.filter(function(x){return x.id === checkId && x.accountId === sourceId && x.open;})[0];
+    if (!check) throw new Error('Tahsil edilecek açık çeki seçin.');
+    amount = check.amount;
+    checkNo = check.number; checkDueDate = check.dueDate ? parseDate_(check.dueDate, 'Çek vade tarihi') : '';
+    checkDrawer = check.drawer; checkBank = check.bank;
+  } else if (targetType === 'CEK') {
+    if (!checkNo || !checkDueDate) throw new Error('Çek hesabına aktarımda çek numarası ve vade tarihi zorunludur.');
+  } else {
+    checkId = ''; checkNo = ''; checkDueDate = ''; checkDrawer = ''; checkBank = '';
+  }
+  const sourceFx = accountTransferFxMeta_(payload, 'source', source, amount);
+  const targetFx = accountTransferFxMeta_(payload, 'target', target, amount);
+  if (sourceType === 'DOVIZ' && sourceFx.foreign > accountForeignCurrentBalance_(sourceId) + 0.0001) throw new Error('Döviz hesabında yeterli dolar bulunmuyor.');
+  const available = cashAccountCurrentBalance_(sourceId);
+  if (amount > available + 0.005) throw new Error('Kaynak hesapta yeterli bakiye yok. Kullanılabilir bakiye: ' + moneyText_(available));
+  const id = makeId_('TRF');
+  withLock_(function() {
+    appendRows_(ensureFinanceTransferSheets_(), [[
+      id,date,source.values[0],source.values[1],target.values[0],target.values[1],amount,cleanText_(payload.note,300),
+      sourceFx.foreign,targetFx.foreign,sourceFx.rate,targetFx.rate,checkId,checkNo,checkDueDate,checkDrawer,checkBank,session.email,new Date()
+    ]], HEADERS.accountTransfers.length);
+    audit_(session.email, 'HESAP_AKTARIMI', 'Kasa/Banka', id, source.values[1] + ' → ' + target.values[1] + ' / ' + amount + ' TL');
+  });
+  return {ok:true,id:id,amount:amount};
+}
+
+function checkHasCollectionTransfer_(collectionId) {
+  return optionalDataRows_(APP.sheets.accountTransfers).some(function(r){return String(r[12]||'')===String(collectionId||'');});
+}
+
 function saveLoan(token, payload) {
   const session = requireAdmin_(token);
   payload = payload || {};
@@ -2428,14 +2521,17 @@ function deleteReceiptExpense(token, expenseId) {
 
 function expensePaymentAccount_(accountId) {
   const account = findRowBy_(APP.sheets.cashAccounts, 1, cleanText_(accountId, 60));
-  if (!account || account.values[4] !== true) throw new Error('Aktif bir nakit kasa veya banka hesabı seçin.');
+  if (!account || account.values[4] !== true) throw new Error('Aktif bir ödeme hesabı seçin.');
   const type = normalizeHeader_(account.values[2]);
-  if (type !== 'KASA' && type !== 'BANKA') throw new Error('Gider ödemeleri yalnızca Nakit Kasa veya Banka hesabından yapılabilir.');
+  if (type !== 'KASA' && type !== 'BANKA' && type !== 'CEK') throw new Error('Gider ödemeleri yalnızca Nakit Kasa, Banka veya Çek hesabından yapılabilir.');
   return account;
 }
 
 function expensePaymentMethod_(accountType) {
-  return normalizeHeader_(accountType) === 'KASA' ? 'Nakit Kasa' : 'Banka';
+  const type = normalizeHeader_(accountType);
+  if (type === 'KASA') return 'Nakit Kasa';
+  if (type === 'CEK') return 'Çek';
+  return 'Banka';
 }
 
 function recalculateCurrentExpense_(currentId) {
@@ -3227,7 +3323,7 @@ function buildAppData_(session, filters) {
     user: session,
     filters: { start: isoDate_(start), end: isoDate_(end), applyToLists:applyToLists },
     donationTypes: dataRows_(APP.sheets.types).filter(r => r[1] === true).map(r => r[0]),
-    methods: ['Nakit','Havale / EFT','Kredi Kartı','POS','Diğer'],
+    methods: ['Nakit','Havale / EFT','Kredi Kartı','POS','Çek','Diğer'],
     preferences: {
       pledgeHiddenColumns:pledgeHiddenColumnsForUser_(session.userId),
       collectionHiddenColumns:collectionHiddenColumnsForUser_(session.userId)
@@ -3412,7 +3508,7 @@ function groupSubActivities_(pledges, collections, periodCollections) {
   const map = {};
   const pledgeMap = {};
   const paymentChannelKeys = {
-    'NAKIT':true, 'BANKA':true, 'HAVALE':true, 'EFT':true, 'POS':true,
+    'NAKIT':true, 'BANKA':true, 'HAVALE':true, 'EFT':true, 'POS':true, 'CEK':true,
     'KREDI KARTI':true, 'HAVALE / EFT':true, 'KART / POS':true
   };
   function nameForPledge_(row) { return canonicalSubActivity_(row && row[18]) || canonicalSubActivity_(row && row[17]) || canonicalSubActivity_(row && row[2]) || 'Belirtilmemiş'; }
@@ -3465,7 +3561,7 @@ function groupActivities_(pledges, collections, periodCollections) {
   const map = {};
   const pledgeMap = {};
   const paymentChannelKeys = {
-    'NAKIT':true, 'BANKA':true, 'HAVALE':true, 'EFT':true, 'POS':true,
+    'NAKIT':true, 'BANKA':true, 'HAVALE':true, 'EFT':true, 'POS':true, 'CEK':true,
     'KREDI KARTI':true, 'HAVALE / EFT':true, 'KART / POS':true
   };
   function nameForPledge_(row) {
@@ -3615,7 +3711,7 @@ function expenseRemainingItems_(commitments) {
 }
 
 function pledgeDto_(r) { return { id:r[0], year:r[1], donationType:r[2], fullName:personName_(r[3]), phone:r[4], payer:personName_(r[5]), reference:personName_(r[6]), amount:n_(r[7]), paid:n_(r[8]), remaining:n_(r[9]), status:r[10], pledgeDate:isoDate_(r[11]), personnel:personName_(r[14]), receivableStatus:String(r[15]||'AKTİF').toUpperCase(), source:String(r[16]||'BAĞIŞ').toUpperCase(), activity:r[17]||'', subActivity:r[18]||'', accountCode:r[19]||'', group:personName_(r[20]), notes:r[21]||'' }; }
-function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:personName_(r[3]), donationType:r[4], reference:personName_(r[5]), payer:personName_(r[6]), amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'', receiptNo:r[18]||'', group:personName_(r[19]), activity:r[20]||'', phone:r[21]||'', currency:r[22]||'', foreignAmount:n_(r[23]), exchangeRate:n_(r[24]), referenceType:collectionReferenceType_(r) }; }
+function collectionDto_(r) { return { id:r[0], date:isoDate_(r[1]), pledgeId:r[2], direct:!r[2], fullName:personName_(r[3]), donationType:r[4], reference:personName_(r[5]), payer:personName_(r[6]), amount:n_(r[7]), method:r[8], note:r[9], createdBy:r[10]||'', createdAt:r[11] instanceof Date?Utilities.formatDate(r[11],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[11]||''), accountId:r[12]||'', accountName:r[13]||'', approvalStatus:collectionApprovalStatus_(r), approvedBy:r[15]||'', approvedAt:r[16] instanceof Date?Utilities.formatDate(r[16],'Europe/Istanbul','dd.MM.yyyy HH:mm'):String(r[16]||''), rejectionReason:r[17]||'', receiptNo:r[18]||'', group:personName_(r[19]), activity:r[20]||'', phone:r[21]||'', currency:r[22]||'', foreignAmount:n_(r[23]), exchangeRate:n_(r[24]), referenceType:collectionReferenceType_(r), checkNo:r[26]||'', checkDueDate:isoDate_(r[27]), checkDrawer:r[28]||'', checkBank:r[29]||'' }; }
 function collectionRemainingAfterMap_(pledges, collections) {
   const amounts={};(pledges||[]).forEach(function(r){amounts[String(r[0])]=Number(r[7])||0;});
   const indexed=(collections||[]).map(function(r,index){return {row:r,index:index};}).filter(function(x){return Boolean(String(x.row[2]||'').trim());});
@@ -3726,7 +3822,29 @@ function generalExpenseData_(start,end,applyToLists) {
 function currentExpenseDto_(r){return {id:r[0],year:r[1],name:r[2],type:r[3],amount:n_(r[4]),paid:n_(r[5]),remaining:n_(r[6]),status:r[7],note:r[8]||'',createdAt:isoDate_(r[9])};}
 function currentExpensePaymentDto_(r){return {id:r[0],date:isoDate_(r[1]),currentId:r[2],name:r[3],amount:n_(r[4]),method:r[5],accountId:r[6],accountName:r[7],note:r[8]||''};}
 function receiptExpenseDto_(r){return {id:r[0],date:isoDate_(r[1]),name:r[2],type:r[3],amount:n_(r[4]),method:r[5],accountId:r[6],accountName:r[7],note:r[8]||''};}
-function cashAccountDto_(r, collections, staffPayments, teacherPayments, loans, loanRepayments, currentExpensePayments, receiptExpenses) {
+function accountForeignCurrentBalance_(accountId) {
+  const account=findRowBy_(APP.sheets.cashAccounts,1,accountId);if(!account)return 0;
+  const currency=account.values[7]||'USD';
+  const collectionForeign=dataRows_(APP.sheets.collections).filter(function(c){return c[12]===accountId&&isCollectionApprovedRow_(c)&&String(c[22]||'')===currency;}).reduce(function(s,c){return s+n_(c[23]);},0);
+  const transfers=optionalDataRows_(APP.sheets.accountTransfers);
+  const incoming=transfers.filter(function(t){return t[4]===accountId;}).reduce(function(s,t){return s+n_(t[9]);},0);
+  const outgoing=transfers.filter(function(t){return t[2]===accountId;}).reduce(function(s,t){return s+n_(t[8]);},0);
+  return n_(account.values[8])+collectionForeign+incoming-outgoing;
+}
+
+function checkPortfolio_(collections, transfers, accountRows) {
+  const accounts={};(accountRows||[]).forEach(function(r){accounts[String(r[0])]=r;});
+  const collected={};(transfers||[]).forEach(function(t){if(t[12])collected[String(t[12])]=t;});
+  const items=[];
+  (collections||[]).forEach(function(c){const a=accounts[String(c[12])];if(!a||normalizeHeader_(a[2])!=='CEK'||!isCollectionApprovedRow_(c))return;items.push({id:String(c[0]),date:isoDate_(c[1]),dueDate:isoDate_(c[27]),number:c[26]||'Bilgi girilmemiş',drawer:c[28]||c[3]||'',bank:c[29]||'',amount:n_(c[7]),accountId:a[0],accountName:a[1],source:c[2]?'Tahsilat':'Teberru'});});
+  (transfers||[]).forEach(function(t){const a=accounts[String(t[4])];if(!a||normalizeHeader_(a[2])!=='CEK'||!t[13])return;items.push({id:String(t[0]),date:isoDate_(t[1]),dueDate:isoDate_(t[14]),number:t[13],drawer:t[15]||'',bank:t[16]||'',amount:n_(t[6]),accountId:a[0],accountName:a[1],source:'Hesap aktarımı'});});
+  const today=isoDate_(new Date());
+  return items.map(function(x){const out=collected[x.id];x.open=!out;x.status=out?'TAHSİL EDİLDİ':(x.dueDate&&x.dueDate<today?'VADESİ GEÇTİ':'PORTFÖYDE');x.collectedDate=out?isoDate_(out[1]):'';x.targetAccountId=out?out[4]:'';x.targetAccountName=out?out[5]:'';return x;}).sort(function(a,b){return String(a.open?0:1).localeCompare(String(b.open?0:1))||String(a.dueDate||'9999').localeCompare(String(b.dueDate||'9999'));});
+}
+
+function accountTransferDto_(r){return {id:r[0],date:isoDate_(r[1]),sourceAccountId:r[2],sourceAccountName:r[3],targetAccountId:r[4],targetAccountName:r[5],amount:n_(r[6]),note:r[7]||'',sourceForeign:n_(r[8]),targetForeign:n_(r[9]),sourceRate:n_(r[10]),targetRate:n_(r[11]),checkId:r[12]||'',checkNo:r[13]||'',checkDueDate:isoDate_(r[14])};}
+
+function cashAccountDto_(r, collections, staffPayments, teacherPayments, loans, loanRepayments, currentExpensePayments, receiptExpenses, transfers) {
   const collected=collections.filter(function(c){return c[12]===r[0];}).reduce(function(s,c){return s+(Number(c[7])||0);},0);
   const staffExpense=staffPayments.filter(function(p){return p[8]===r[0];}).reduce(function(s,p){return s+(Number(p[4])||0);},0);
   const teacherExpense=teacherPayments.filter(function(p){return p[8]===r[0];}).reduce(function(s,p){return s+(Number(p[4])||0);},0);
@@ -3734,11 +3852,15 @@ function cashAccountDto_(r, collections, staffPayments, teacherPayments, loans, 
   const debtRepaid=loanRepayments.filter(function(x){return x[8]===r[0];}).reduce(function(s,x){return s+(Number(x[4])||0);},0);
   const currentExpense=currentExpensePayments.filter(function(x){return x[6]===r[0];}).reduce(function(s,x){return s+(Number(x[4])||0);},0);
   const receiptExpense=receiptExpenses.filter(function(x){return x[6]===r[0];}).reduce(function(s,x){return s+(Number(x[4])||0);},0);
+  const transferIn=(transfers||[]).filter(function(x){return x[4]===r[0];}).reduce(function(s,x){return s+n_(x[6]);},0);
+  const transferOut=(transfers||[]).filter(function(x){return x[2]===r[0];}).reduce(function(s,x){return s+n_(x[6]);},0);
   const opening=n_(r[3]);
   const currency=r[7]||((String(r[2]||'').toUpperCase()==='DÖVİZ')?'USD':'');
   const openingForeign=n_(r[8]);
   const foreignCollected=collections.filter(function(c){return c[12]===r[0]&&String(c[22]||'')===currency;}).reduce(function(s,c){return s+(Number(c[23])||0);},0);
-  return {id:r[0],name:r[1],type:r[2],openingBalance:opening,collected:collected,borrowed:borrowed,staffExpense:staffExpense,teacherExpense:teacherExpense,currentExpense:currentExpense,receiptExpense:receiptExpense,debtRepaid:debtRepaid,totalExpense:staffExpense+teacherExpense+currentExpense+receiptExpense+debtRepaid,balance:opening+collected+borrowed-staffExpense-teacherExpense-currentExpense-receiptExpense-debtRepaid,active:r[4]===true,note:r[5],currency:currency,openingForeign:openingForeign,openingRate:n_(r[9]),foreignCollected:foreignCollected,foreignBalance:openingForeign+foreignCollected};
+  const foreignTransferIn=(transfers||[]).filter(function(x){return x[4]===r[0];}).reduce(function(s,x){return s+n_(x[9]);},0);
+  const foreignTransferOut=(transfers||[]).filter(function(x){return x[2]===r[0];}).reduce(function(s,x){return s+n_(x[8]);},0);
+  return {id:r[0],name:r[1],type:r[2],openingBalance:opening,collected:collected,borrowed:borrowed,staffExpense:staffExpense,teacherExpense:teacherExpense,currentExpense:currentExpense,receiptExpense:receiptExpense,debtRepaid:debtRepaid,transferIn:transferIn,transferOut:transferOut,totalExpense:staffExpense+teacherExpense+currentExpense+receiptExpense+debtRepaid,balance:opening+collected+borrowed+transferIn-transferOut-staffExpense-teacherExpense-currentExpense-receiptExpense-debtRepaid,active:r[4]===true,note:r[5],currency:currency,openingForeign:openingForeign,openingRate:n_(r[9]),foreignCollected:foreignCollected,foreignBalance:openingForeign+foreignCollected+foreignTransferIn-foreignTransferOut};
 }
 function cashMovementDescription_(primary, details, note) {
   const parts=[];
@@ -3753,7 +3875,7 @@ function cashMovementDescription_(primary, details, note) {
   if(cleanNote)parts.push('Not: '+cleanNote);
   return parts.join(' · ');
 }
-function cashMovements_(accountRows, collections, staffPayments, teacherPayments, loans, loanRepayments, currentExpensePayments, receiptExpenses, staffCommitments, teacherCommitments, currentExpenses) {
+function cashMovements_(accountRows, collections, staffPayments, teacherPayments, loans, loanRepayments, currentExpensePayments, receiptExpenses, staffCommitments, teacherCommitments, currentExpenses, transfers) {
   const accountMap={};accountRows.forEach(function(r){accountMap[String(r[0])]=r;});
   const staffMap={};(staffCommitments||[]).forEach(function(r){staffMap[String(r[0])]=r;});
   const teacherMap={};(teacherCommitments||[]).forEach(function(r){teacherMap[String(r[0])]=r;});
@@ -3768,9 +3890,11 @@ function cashMovements_(accountRows, collections, staffPayments, teacherPayments
   loanRepayments.forEach(function(r){add(r[8],r[1],r[0],'Borç geri ödemesi',cashMovementDescription_(r[3],[['İşlem','Borç geri ödemesi']],r[6]),0,r[4]);});
   currentExpensePayments.forEach(function(r){const c=currentMap[String(r[2])]||[];add(r[6],r[1],r[0],'Cari ödeme',cashMovementDescription_(r[3],[['Nevi',c[3]],['Cari yılı',c[1]]],r[8]||c[8]),0,r[4]);});
   receiptExpenses.forEach(function(r){add(r[6],r[1],r[0],'Fiş gideri',cashMovementDescription_(r[2],[['Gider türü',r[3]]],r[8]),0,r[4]);});
+  (transfers||[]).forEach(function(r){const checkDetail=r[13]?' · Çek: '+r[13]:'';add(r[2],r[1],r[0]+'-OUT','Hesap aktarımı',r[5]+' hesabına aktarım'+checkDetail+(r[7]?' · '+r[7]:''),0,r[6],r[8]?'USD':'',r[8],r[10]);add(r[4],r[1],r[0]+'-IN','Hesap aktarımı',r[3]+' hesabından aktarım'+checkDetail+(r[7]?' · '+r[7]:''),r[6],0,r[9]?'USD':'',r[9],r[11]);});
   return result.sort(function(a,b){return String(b.date).localeCompare(String(a.date))||String(b.id).localeCompare(String(a.id));});
 }
 function cashData_(collections) {
+  ensureFinanceTransferSheets_();
   const staffPayments=optionalDataRows_(APP.sheets.staffPayments);
   const teacherPayments=optionalDataRows_(APP.sheets.teacherPayments);
   const loans=optionalDataRows_(APP.sheets.loans);
@@ -3781,11 +3905,14 @@ function cashData_(collections) {
   const teacherCommitments=optionalDataRows_(APP.sheets.teacherCommitments);
   const currentExpenses=optionalDataRows_(APP.sheets.currentExpenses);
   const accountRows=optionalDataRows_(APP.sheets.cashAccounts);
-  const accounts=accountRows.map(function(r){return cashAccountDto_(r,collections,staffPayments,teacherPayments,loans,loanRepayments,currentExpensePayments,receiptExpenses);});
+  const transfers=optionalDataRows_(APP.sheets.accountTransfers);
+  const accounts=accountRows.map(function(r){return cashAccountDto_(r,collections,staffPayments,teacherPayments,loans,loanRepayments,currentExpensePayments,receiptExpenses,transfers);});
   const activeAccounts=accounts.filter(function(a){return a.active;});
   return {
     accounts:accounts,
-    movements:cashMovements_(accountRows,collections,staffPayments,teacherPayments,loans,loanRepayments,currentExpensePayments,receiptExpenses,staffCommitments,teacherCommitments,currentExpenses),
+    movements:cashMovements_(accountRows,collections,staffPayments,teacherPayments,loans,loanRepayments,currentExpensePayments,receiptExpenses,staffCommitments,teacherCommitments,currentExpenses,transfers),
+    transfers:transfers.slice().reverse().map(accountTransferDto_),
+    checks:checkPortfolio_(collections,transfers,accountRows),
     totalBalance:activeAccounts.reduce(function(s,a){return s+a.balance;},0),
     totalCollected:activeAccounts.reduce(function(s,a){return s+a.collected;},0),
     totalBorrowed:activeAccounts.reduce(function(s,a){return s+a.borrowed;},0),
@@ -3809,7 +3936,10 @@ function cashAccountCurrentBalance_(accountId) {
   const debtRepaid=optionalDataRows_(APP.sheets.loanRepayments).filter(function(r){return r[8]===accountId;}).reduce(function(s,r){return s+(Number(r[4])||0);},0);
   const currentExpense=optionalDataRows_(APP.sheets.currentExpensePayments).filter(function(r){return r[6]===accountId;}).reduce(function(s,r){return s+(Number(r[4])||0);},0);
   const receiptExpense=optionalDataRows_(APP.sheets.receiptExpenses).filter(function(r){return r[6]===accountId;}).reduce(function(s,r){return s+(Number(r[4])||0);},0);
-  return (Number(account.values[3])||0)+income+borrowed-staff-teacher-currentExpense-receiptExpense-debtRepaid;
+  const transfers=optionalDataRows_(APP.sheets.accountTransfers);
+  const transferIn=transfers.filter(function(r){return r[4]===accountId;}).reduce(function(s,r){return s+(Number(r[6])||0);},0);
+  const transferOut=transfers.filter(function(r){return r[2]===accountId;}).reduce(function(s,r){return s+(Number(r[6])||0);},0);
+  return (Number(account.values[3])||0)+income+borrowed+transferIn-transferOut-staff-teacher-currentExpense-receiptExpense-debtRepaid;
 }
 function assertCashDeltas_(deltas, operation) {
   Object.keys(deltas || {}).forEach(function(accountId) {
@@ -3839,6 +3969,10 @@ function updateAccountNameReferences_(accountId, accountName) {
     const ids = sh.getRange(2, cfg[1], sh.getLastRow() - 1, 1).getValues();
     ids.forEach(function(r, index) { if (r[0] === accountId) sh.getRange(index + 2, cfg[2]).setValue(accountName); });
   });
+  const transfers=getDb_().getSheetByName(APP.sheets.accountTransfers);
+  if (transfers && transfers.getLastRow()>1) {
+    [[3,4],[5,6]].forEach(function(pair){const ids=transfers.getRange(2,pair[0],transfers.getLastRow()-1,1).getValues();ids.forEach(function(r,index){if(r[0]===accountId)transfers.getRange(index+2,pair[1]).setValue(accountName);});});
+  }
 }
 
 function expenseConfig_(kind) {
