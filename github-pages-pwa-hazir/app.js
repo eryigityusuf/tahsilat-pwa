@@ -2,7 +2,7 @@ const state={token:'',data:null,view:'dashboard',pages:{},pageSizes:{collections
 const PAGE_SIZE=100;
 const PWA_ENTRY_URL='https://eryigityusuf.github.io/tahsilat-pwa/github-pages-pwa-hazir/';
 const PWA_PARENT_ORIGIN='https://eryigityusuf.github.io';
-const PWA_BUILD='105';
+const PWA_BUILD='106';
 const PLEDGE_REFERENCE_TYPES=['PERSONEL','İHVAN','AHAVAT'];
 const SUPABASE_API='https://yrhirwtwokzmixfbjlde.supabase.co/functions/v1/tahsilat-api';
 const IDLE_SESSION_MS=30*60*1000;
@@ -763,6 +763,27 @@ function applyStaffScope(){
   if(!selected.length){toast('En az bir tür/dönem seçin.',true);return;}state.staffSummaryScope=selected.length===inputs.length?[]:selected;resetPage('staff-commitments');state.staffPaymentDrill={person:'',month:''};$('#modal').close();renderExpense('staff');
 }
 function clearStaffScope(){state.staffSummaryScope=[];resetPage('staff-commitments');state.staffPaymentDrill={person:'',month:''};renderExpense('staff')}
+let showAllStaffAccrualDetails=false;
+const staffAccrualDetailOverrides=new Set();
+function staffAccrualTotals(commitments,sort){
+  const people=new Map();
+  commitments.forEach(record=>{const key=normalizeSearch(record.name)||record.id;const person=people.get(key)||{key:key,name:record.name||'İsimsiz',items:[],total:0,paid:0,remaining:0,latestPeriod:0};person.items.push(record);person.total+=Number(record.total)||0;person.paid+=Number(record.paid)||0;person.remaining+=Number(record.remaining)||0;person.latestPeriod=Math.max(person.latestPeriod,staffPeriodSort(record.period));people.set(key,person)});
+  const results=[...people.values()];
+  const amountKey={'total-desc':'total','paid-desc':'paid','remaining-desc':'remaining'}[sort];
+  if(amountKey)results.sort((a,b)=>b[amountKey]-a[amountKey]||a.name.localeCompare(b.name,'tr'));
+  else if(sort==='name-desc')results.sort((a,b)=>b.name.localeCompare(a.name,'tr'));
+  else if(sort==='period-desc')results.sort((a,b)=>b.latestPeriod-a.latestPeriod||a.name.localeCompare(b.name,'tr'));
+  else results.sort((a,b)=>a.name.localeCompare(b.name,'tr'));
+  return results;
+}
+function toggleStaffAccrualDetail(button){const key=button.dataset.person;const detail=document.getElementById(button.getAttribute('aria-controls'));if(!detail)return;const expanded=detail.classList.toggle('hidden')===false;if(expanded===showAllStaffAccrualDetails)staffAccrualDetailOverrides.delete(key);else staffAccrualDetailOverrides.add(key);button.setAttribute('aria-expanded',String(expanded));button.textContent=expanded?'Detayı gizle':'Detay göster'}
+function toggleAllStaffAccrualDetails(){showAllStaffAccrualDetails=!showAllStaffAccrualDetails;staffAccrualDetailOverrides.clear();renderExpense('staff');$('#staffAccrualAllDetails')?.focus()}
+function staffAccrualSummaryTable(commitments,sort,detailHeaders,recordRow){
+  const paged=pageData('staff-commitments',staffAccrualTotals(commitments,sort));
+  const rows=paged.items.flatMap((person,index)=>{const id='staffAccrualDetails-'+state.pages['staff-commitments']+'-'+index;const expanded=showAllStaffAccrualDetails!==staffAccrualDetailOverrides.has(person.key);const summary=`<tr class="staff-accrual-summary-row"><td><strong>${esc(person.name)}</strong><small>${person.items.length} tahakkuk kalemi</small></td><td class="money">${money(person.total)}</td><td class="money income-cell">${money(person.paid)}</td><td class="money ${person.remaining>0?'expense-cell':''}">${money(person.remaining)}</td><td><button type="button" class="btn tiny secondary" data-person="${esc(person.key)}" aria-controls="${id}" aria-expanded="${expanded}" onclick="toggleStaffAccrualDetail(this)">${expanded?'Detayı gizle':'Detay göster'}</button></td></tr>`;const detail=`<tr id="${id}" class="staff-accrual-detail-row ${expanded?'':'hidden'}"><td colspan="5"><div class="staff-accrual-detail-panel">${table(detailHeaders,person.items.map(recordRow),'Tahakkuk detayı bulunamadı.','staff-accrual-detail')}</div></td></tr>`;return [summary,detail]});
+  const toggle=paged.items.length?`<div class="staff-accrual-summary-toolbar"><div><strong>Personel bazında tahakkuk toplamları</strong><span>${paged.total} personel · ${commitments.length} tahakkuk kalemi</span></div><button id="staffAccrualAllDetails" type="button" class="btn secondary" aria-pressed="${showAllStaffAccrualDetails}" onclick="toggleAllStaffAccrualDetails()">${showAllStaffAccrualDetails?'Tüm detayları gizle':'Tüm detayları göster'}</button></div>`:'';
+  return toggle+table(['Personel','Toplam tahakkuk','Ödenen','Kalan','Detay'],rows,'Gösterilecek personel tahakkuku bulunamadı.','staff-accrual-summary')+paged.controls;
+}
 function renderExpense(kind){
   const d=kind==='staff'?state.data.staff:state.data.teachers;
   const scopedCommitments=kind==='staff'?staffScopedCommitments():d.commitments;
@@ -782,14 +803,13 @@ function renderExpense(kind){
     }
     const accrualSorters={'total-desc':(a,b)=>b.total-a.total,'paid-desc':(a,b)=>b.paid-a.paid,'remaining-desc':(a,b)=>b.remaining-a.remaining,'name-asc':(a,b)=>a.name.localeCompare(b.name,'tr'),'name-desc':(a,b)=>b.name.localeCompare(a.name,'tr'),'period-desc':(a,b)=>staffPeriodSort(b.period)-staffPeriodSort(a.period)};
     const commitments=[...scopedCommitments].filter(x=>(!staffQuery||normalizeSearch(x.name).includes(staffQuery))&&(kind!=='staff'||(!af.period||x.period===af.period)&&(!af.type||x.paymentType===af.type)&&(!af.status||x.status===af.status)&&(af.minTotal==null||af.minTotal===''||Number(x.total)>=Number(af.minTotal))&&(af.minPaid==null||af.minPaid===''||Number(x.paid)>=Number(af.minPaid))&&(af.minRemaining==null||af.minRemaining===''||Number(x.remaining)>=Number(af.minRemaining)))).sort(kind==='staff'?(accrualSorters[af.sort]||accrualSorters['total-desc']):(a,b)=>b.total-a.total);
-    const paged=pageData(kind+'-commitments',commitments);
-    const rows=paged.items.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.paymentType)}</td><td>${esc(x.period)}</td>${kind==='teacher'?`<td class="money">${x.lessonHours}</td><td class="money">${money(x.hourlyRate)}</td>`:''}<td class="money">${money(x.total)}</td><td class="money">${money(x.paid)}</td><td class="money">${money(x.remaining)}</td><td><span class="status ${statusClass(x.status)}">${esc(x.status)}</span></td><td><div class="row-actions">${kind==='staff'?`<button class="btn tiny" onclick="editStaffAccrualModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeStaffAccrual('${esc(x.id)}')">Sil</button>`:`<button class="btn tiny" onclick="editTeacherAccrualModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeTeacherAccrual('${esc(x.id)}')">Sil</button>`}</div></td></tr>`);
+    const recordRow=x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.paymentType)}</td><td>${esc(x.period)}</td>${kind==='teacher'?`<td class="money">${x.lessonHours}</td><td class="money">${money(x.hourlyRate)}</td>`:''}<td class="money">${money(x.total)}</td><td class="money">${money(x.paid)}</td><td class="money">${money(x.remaining)}</td><td><span class="status ${statusClass(x.status)}">${esc(x.status)}</span></td><td><div class="row-actions">${kind==='staff'?`<button class="btn tiny" onclick="editStaffAccrualModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeStaffAccrual('${esc(x.id)}')">Sil</button>`:`<button class="btn tiny" onclick="editTeacherAccrualModal('${esc(x.id)}')">Düzelt</button><button class="btn tiny danger" onclick="removeTeacherAccrual('${esc(x.id)}')">Sil</button>`}</div></td></tr>`;
     const headers=[label,'Ders / Tür','Dönem'];
     if(kind==='teacher')headers.push('Ders Saati','Saatlik Ücret');
     headers.push('Toplam','Ödenen','Kalan','Durum');
     headers.push('İşlem');
-    const staffSearch=kind==='staff'?staffAccrualFilterHtml(scopedCommitments,commitments):'';
-    body=staffSearch+table(headers,rows,(kind==='staff'&&(staffQuery||af.period||af.type||af.status||af.minTotal!==''||af.minPaid!==''||af.minRemaining!==''))?'Filtrelere uyan personel tahakkuku bulunamadı.':'Henüz tahakkuk yok.')+paged.controls;
+    if(kind==='staff')body=staffAccrualFilterHtml(scopedCommitments,commitments)+staffAccrualSummaryTable(commitments,af.sort,headers,recordRow);
+    else{const paged=pageData('teacher-commitments',commitments);body=table(headers,paged.items.map(recordRow),'Henüz tahakkuk yok.')+paged.controls}
     action=kind==='staff'?`<div class="actions"><button class="btn secondary" onclick="staffAccrualReportModal()">Aylık tahakkuk raporu</button><button class="btn secondary" onclick="bulkStaffPaymentModal()">Toplu ödeme</button><button class="btn primary" onclick="expenseCommitmentModal('${kind}')">Yeni tahakkuk</button></div>`:`<div class="actions"><button class="btn secondary" onclick="teacherMonthModal()">Planlardan toplu tahakkuk</button><button class="btn primary" onclick="expenseCommitmentModal('${kind}')">Tek tahakkuk ekle</button></div>`;
   }else if(tab==='plans'&&kind==='staff'){
     const paged=pageData('staff-plans',[...(state.data.staffPlans||[])].sort((a,b)=>b.amount-a.amount));
