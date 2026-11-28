@@ -11,5 +11,7 @@ assert.match(client,/person\.remaining\+=Number\(record\.remaining\)/,'Kalan top
 assert.match(client,/Tüm detayları göster/,'Tüm personel tahakkuk detaylarını açma düğmesi bulunmalı.');
 assert.match(client,/staffAccrualSummaryTable\(commitments,af\.sort,headers,recordRow\)/,'Personel tahakkuk sekmesi özet tabloyu kullanmalı.');
 assert.match(styles,/\.staff-accrual-summary-toolbar/,'Personel bazlı özet görünümü özel ve duyarlı tasarıma sahip olmalı.');
+assert.match(styles,/\.data-table-staff-accrual-detail\{[^}]*table-layout:fixed/,'Detay tablosu satırlar arasında değişmeyen sütun düzeni kullanmalı.');
+assert.match(styles,/\.data-table-staff-accrual-detail>tbody>tr:first-child>td\{[^}]*transform:none/,'İlk detay satırı dış tablo stilinden etkilenmeden hizalanmalı.');
 
 console.log(JSON.stringify({personTotals:true,individualDetails:true,showAll:true,responsive:true,ok:true}));
