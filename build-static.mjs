@@ -28,7 +28,7 @@ const index = indexTemplate
     '      <button class="btn primary" type="button" onclick="continueSession()">Oturuma devam et</button>',
     '    </div>',
     '  </div>',
-    '  <script src="./app.js?v=107" defer></script>',
+    '  <script src="./app.js?v=108" defer></script>',
   ].join('\n'));
 
 const styles = stylesTemplate

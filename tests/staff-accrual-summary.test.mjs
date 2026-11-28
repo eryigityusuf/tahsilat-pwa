@@ -13,5 +13,6 @@ assert.match(client,/staffAccrualSummaryTable\(commitments,af\.sort,headers,reco
 assert.match(styles,/\.staff-accrual-summary-toolbar/,'Personel bazlı özet görünümü özel ve duyarlı tasarıma sahip olmalı.');
 assert.match(styles,/\.data-table-staff-accrual-detail\{[^}]*table-layout:fixed/,'Detay tablosu satırlar arasında değişmeyen sütun düzeni kullanmalı.');
 assert.match(styles,/\.data-table-staff-accrual-detail>tbody>tr:first-child>td\{[^}]*transform:none/,'İlk detay satırı dış tablo stilinden etkilenmeden hizalanmalı.');
+assert.match(styles,/td:nth-child\(1\),\.data-table-staff-accrual-detail>tbody>tr>td:nth-child\(2\),\.data-table-staff-accrual-detail>tbody>tr>td:nth-child\(3\)\{text-align:left!important/,'Metin hücreleri ilk satır dahil aynı hizada olmalı.');
 
 console.log(JSON.stringify({personTotals:true,individualDetails:true,showAll:true,responsive:true,ok:true}));
